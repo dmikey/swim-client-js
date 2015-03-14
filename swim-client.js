@@ -87,13 +87,13 @@ function handleMessage(endpoint, envelope) {
 
 function sendEvent(uri, lane, body) {
   var channel = Channel.get(uri);
-  var message = new proto.SendEventMessage(channel.relative(uri), lane, body);
+  var message = new proto.EventMessage(channel.relative(uri), lane, undefined, body);
   channel.send(message);
 }
 
 function sendCommand(uri, lane, body) {
   var channel = Channel.get(uri);
-  var message = new proto.SendCommandMessage(channel.relative(uri), lane, body);
+  var message = new proto.CommandMessage(channel.relative(uri), lane, undefined, body);
   channel.send(message);
 }
 

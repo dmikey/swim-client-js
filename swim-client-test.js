@@ -86,7 +86,7 @@ describe('SWIM client', function () {
   it('should send events', function (done) {
     var record = recon.parse('@switch { level: 100 }');
     socket.receive = function (message) {
-      if (message.isSendEventMessage) {
+      if (message.isEventMessage) {
         assert.equal(message.node, '/house#kitchen/light');
         assert.equal(message.lane, 'light/on');
         assert.same(message.body, record);
@@ -99,7 +99,7 @@ describe('SWIM client', function () {
   it('should send commands', function (done) {
     var record = recon.parse('@switch { level: 0 }');
     socket.receive = function (message) {
-      if (message.isSendCommandMessage) {
+      if (message.isCommandMessage) {
         assert.equal(message.node, '/house');
         assert.equal(message.lane, 'light/off');
         assert.same(message.body, record);
