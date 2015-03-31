@@ -19,6 +19,8 @@ assert.same = function (x, y) {
 
 
 describe('SWIM client', function () {
+  this.timeout(5000);
+
   var httpServer, wsServer, connection, socket;
   var endpoint = 'http://localhost:8009';
 
