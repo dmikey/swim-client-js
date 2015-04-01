@@ -20,6 +20,7 @@ function reset() {
 
 function link(uri, lane, handler) {
   if (typeof handler === 'function') handler = {done: handler};
+  if (!handler.error) handler.error = function () {};
 
   var unlinked = false;
   var nodeHandlers = linkHandlers[uri];
@@ -151,6 +152,22 @@ function Channel(uri) {
   };
   this.socket.onclose = function () {
     delete Channel.bridge[that.uri];
+    for (var uri in linkHandlers) if (uri.indexOf(that.uri) === 0) {
+      var nodeHandlers = linkHandlers[uri];
+      if (nodeHandlers !== undefined) {
+        delete linkHandlers[uri];
+        for (var lane in nodeHandlers) {
+          var laneHandlers = nodeHandlers[lane];
+          var i = 0;
+          var n = laneHandlers.length;
+          while (i < n) {
+            var handler = laneHandlers[i];
+            handler.error();
+            i += 1;
+          }
+        }
+      }
+    }
   };
   this.socket.onmessage = function (frame) {
     var payload = frame.data;
