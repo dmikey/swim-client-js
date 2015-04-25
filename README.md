@@ -17,14 +17,19 @@ var swim = require('swim-client-js');
 
 ### Client API
 
-#### swim.link(node_uri, lane_uri, handler)
+#### swim.link(node_uri, lane_uri, handle)
 
 Subscribe to messages flowing through `node_uri` within `lane_uri`, invoking
-`handler.done(message)` for each event.  If `handler` is a function, it gets
-wrapped as the `done` method of a new handler object.
+`handle.onEvent(message)` for each event, and `handle.onCommand(message)` for
+each command.  If `handle` is a function, it gets wrapped as the `onEvent` and
+`onCommand` methods of a new handle object.
 
-The SWIM client takes care of holding open multiplexed channels to all
-endpoints with active links.
+The SWIM client manages multiplexed channels to all endpoints with active links.
+If the underlying channel disconnects, the SWIM client calls `handle.onBroken()`,
+and attempts to reopen the channel with exponential backoff.  If the connection
+is re-established, the SWIM client invokes `handle.onUnbroken()`.  Broken
+channels are retried indefinitely, or until all link handles to the failed
+endpoint are unlinked.
 
 ```js
 swim.link('http://iot.example.com/house', 'light', function (event) {
@@ -32,16 +37,16 @@ swim.link('http://iot.example.com/house', 'light', function (event) {
 });
 ```
 
-#### swim.unlink(node_uri, lane_uri, handler)
+#### swim.unlink(node_uri, lane_uri, handle)
 
-Unsubscribe a previously linked `handler` from messages flowing through
+Unsubscribe a previously linked `handle` from messages flowing through
 `node_uri` within `lane_uri`.  The SWIM client takes care of closing
 multiplexed channels to endpoints without active links.
 
 ```js
-var handler = {done: function (event) {}};
-swim.link('http://iot.example.com/house#kitchen', 'light', handler);
-swim.unlink('http://iot.example.com/house#kitchen', 'light', handler);
+function handle(message) {}
+swim.link('http://iot.example.com/house#kitchen', 'light', handle);
+swim.unlink('http://iot.example.com/house#kitchen', 'light', handle);
 ```
 
 #### swim.sendEvent(node_uri, lane_uri, message)
@@ -67,7 +72,7 @@ endpoints.
 swim.sendCommand('http://iot.example.com/house', 'light/off');
 ```
 
-#### swim.get(node_uri, handler)
+#### swim.get(node_uri, handle)
 
 Fetch the data model at `node_uri`.
 
@@ -77,7 +82,7 @@ swim.get('http://iot.example.com/house', function (response) {
 });
 ```
 
-#### swim.put(node_uri, content, handler);
+#### swim.put(node_uri, content, handle);
 
 Update the data model at `node_uri` with RECON `content`.
 
