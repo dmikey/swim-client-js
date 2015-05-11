@@ -1,0 +1,43 @@
+{
+  "name": "swim-client-js",
+  "version": "0.0.1",
+  "description": "Structural Web Integrated Messaging (SWIM) JavaScript Client Implementation",
+  "homepage": "https://github.com/coeffect/swim-client-js",
+  "authors": [
+    "Chris Sachs <chris@coeffect.net>"
+  ],
+  "license": "Apache-2.0",
+  "keywords": [
+    "actor",
+    "broker",
+    "command",
+    "control",
+    "dispatch",
+    "distributed",
+    "event",
+    "iot",
+    "messaging",
+    "microservice",
+    "reactive",
+    "recon",
+    "semantic",
+    "service",
+    "streaming",
+    "structural",
+    "swim",
+    "web"
+  ],
+  "dependencies": {
+    "recon-js": "~0.0.6",
+    "swim-proto-js": "~0.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coeffect/swim-client-js.git"
+  },
+  "moduleType": "node",
+  "main": "swim-client.js",
+  "ignore": [
+    "*"
+  ]
+}

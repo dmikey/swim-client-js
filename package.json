@@ -1,6 +1,6 @@
 {
   "name": "swim-client-js",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Structural Web Integrated Messaging (SWIM) JavaScript Client Implementation",
   "homepage": "https://github.com/coeffect/swim-client-js",
   "author": "Chris Sachs <chris@coeffect.net>",
@@ -26,22 +26,25 @@
     "web"
   ],
   "dependencies": {
-    "recon-js": "^0.0.5",
-    "swim-proto-js": "^0.0.2",
+    "recon-js": "^0.0.6",
+    "swim-proto-js": "^0.0.3",
     "uri-js": "^1.4.2",
     "websocket": "^1.0.18"
   },
   "devDependencies": {
-    "browserify": "^9.0.8",
+    "bower": "^1.4.1",
+    "browserify": "^10.1.3",
     "coveralls": "^2.11.2",
     "gulp": "^3.8.11",
-    "gulp-coveralls": "^0.1.3",
-    "gulp-istanbul": "^0.8.1",
+    "gulp-coveralls": "^0.1.4",
+    "gulp-istanbul": "^0.9.0",
+    "gulp-jscs": "^1.6.0",
+    "gulp-jscs-stylish": "^1.1.0",
     "gulp-jshint": "^1.10.0",
     "gulp-mocha": "^2.0.1",
     "gulp-sourcemaps": "^1.5.2",
     "gulp-uglify": "^1.2.0",
-    "jshint-stylish": "^1.0.1",
+    "jshint-stylish": "^1.0.2",
     "run-sequence": "^1.1.0",
     "vinyl-buffer": "^1.0.0",
     "vinyl-source-stream": "^1.1.0"
@@ -52,9 +55,6 @@
   },
   "bugs": {
     "url": "https://github.com/coeffect/swim-client-js/issues"
-  },
-  "engines": {
-    "node": ">=0.10.0"
   },
   "scripts": {
     "test": "gulp",

@@ -14,7 +14,7 @@ var swim = require('./swim-client.js');
 
 assert.same = function (x, y) {
   if (!recon.compare(x, y))
-    assert.fail(false, true, recon.stringify(x) +' did not equal '+ recon.stringify(y));
+    assert.fail(false, true, recon.stringify(x) + ' did not equal ' + recon.stringify(y));
 };
 
 
