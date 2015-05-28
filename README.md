@@ -1,7 +1,5 @@
 # Structural Web Integrated Messaging (SWIM) Client
 
-[![Build Status](https://travis-ci.org/coeffect/swim-client-js.svg?branch=master)](https://travis-ci.org/coeffect/swim-client-js) [![Coverage Status](https://coveralls.io/repos/coeffect/swim-client-js/badge.svg?branch=master)](https://coveralls.io/r/coeffect/swim-client-js?branch=master)
-
 ## JavaScript Library
 
 The SWIM client library can run in any standard JavaScript environment.
