@@ -67,6 +67,7 @@ Channel.prototype.open = function () {
   this.socket.onopen = this.onOpen.bind(this);
   this.socket.onclose = this.onClose.bind(this);
   this.socket.onmessage = this.onFrame.bind(this);
+  this.socket.onerror = this.onClose.bind(this);
 };
 Channel.prototype.close = function () {
   this.closed = true;
