@@ -98,6 +98,8 @@ Channel.prototype.onOpen = function () {
   while ((envelope = this.sendBuffer.shift())) this.send(envelope);
 };
 Channel.prototype.onClose = function () {
+  this.socket.close();
+
   if (this.linkCount === 0 && this.sendBuffer.length === 0) {
     delete Channel.bridge[this.node];
     return;
