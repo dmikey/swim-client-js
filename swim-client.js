@@ -5,7 +5,8 @@ var URI = require('uri-js');
 var WS = require('websocket').w3cwebsocket;
 
 var options = {
-  SEND_BUFFER_SIZE: 1024
+  SEND_BUFFER_SIZE: 1024,
+  MAX_RECONNECT_TIME: 15000
 };
 
 var LINK_FAILED = -2;
@@ -58,7 +59,7 @@ function Channel(node) {
   this.stateHandles = {};
   this.sendBuffer = [];
   this.reconnectTimeout = null;
-  this.reconnectTime = 1000;
+  this.reconnectTime = 250 + Math.round(Math.random() * 750);
   this.closed = false;
   this.open();
 }
@@ -67,7 +68,7 @@ Channel.prototype.open = function () {
   this.socket.onopen = this.onOpen.bind(this);
   this.socket.onclose = this.onClose.bind(this);
   this.socket.onmessage = this.onFrame.bind(this);
-  this.socket.onerror = this.onClose.bind(this);
+  this.socket.onerror = this.onError.bind(this);
 };
 Channel.prototype.close = function () {
   this.closed = true;
@@ -84,7 +85,7 @@ Channel.prototype.buffer = function (envelope) {
 };
 Channel.prototype.onOpen = function () {
   clearTimeout(this.reconnectTimeout);
-  this.reconnectTime = 1000;
+  this.reconnectTime = 250 + Math.round(Math.random() * 750);
 
   var envelope;
   for (var node in this.linkHandles) {
@@ -98,8 +99,6 @@ Channel.prototype.onOpen = function () {
   while ((envelope = this.sendBuffer.shift())) this.send(envelope);
 };
 Channel.prototype.onClose = function () {
-  this.socket.close();
-
   if (this.linkCount === 0 && this.sendBuffer.length === 0) {
     delete Channel.bridge[this.node];
     return;
@@ -122,8 +121,14 @@ Channel.prototype.onClose = function () {
 
   if (!this.closed) {
     this.reconnectTimeout = setTimeout(this.open.bind(this), this.reconnectTime);
-    this.reconnectTime = Math.min(2 * this.reconnectTime, 30000);
+    this.reconnectTime = Math.min(2 * this.reconnectTime, options.MAX_RECONNECT_TIME);
   }
+};
+Channel.prototype.onError = function () {
+  try {
+    this.socket.close(); // Force Chrome to clean up failed connections
+  }
+  catch (e) {}
 };
 Channel.prototype.onFrame = function (frame) {
   var payload = frame.data;
