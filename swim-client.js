@@ -125,10 +125,9 @@ Channel.prototype.onClose = function () {
   }
 };
 Channel.prototype.onError = function () {
-  try {
-    this.socket.close(); // Force Chrome to clean up failed connections
+  if (this.socket.readyState === this.socket.OPEN) {
+    this.socket.close();
   }
-  catch (e) {}
 };
 Channel.prototype.onFrame = function (frame) {
   var payload = frame.data;
