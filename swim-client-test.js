@@ -118,6 +118,39 @@ describe('SWIM client', function () {
     swim.link(URI.resolve(endpoint, '/house/bedroom#light'), 'light/on', handle4);
   });
 
+  it('should sync node lanes', function (done) {
+    var record = recon.parse('@switch { level: 100 }');
+    socket.receive = function (request) {
+      if (request.isSyncRequest && request.node === '/house/kitchen#light' && request.lane === 'light/on') {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        socket.send(new proto.EventMessage('/house/kitchen#light', 'light/on', undefined, record));
+        socket.send(new proto.SyncedResponse(request.node, request.lane));
+      }
+    };
+    var linked = false;
+    var received = false;
+    function onLinked() {
+      linked = true;
+    }
+    function onEvent(response) {
+      received = true;
+      assert.equal(response.node, '/house/kitchen#light');
+      assert.equal(response.lane, 'light/on');
+      assert.same(response.body, record);
+    }
+    function onSynced() {
+      assert(linked);
+      assert(received);
+      done();
+    }
+    var handle = {
+      onLinked: onLinked,
+      onEvent: onEvent,
+      onSynced: onSynced
+    };
+    swim.sync(URI.resolve(endpoint, '/house/kitchen#light'), 'light/on', handle);
+  });
+
   it('should handle coincident links', function (done) {
     var record = recon.parse('@switch { level: 100 }');
     var linkCount = 0;

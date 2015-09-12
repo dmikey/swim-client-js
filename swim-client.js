@@ -16,6 +16,10 @@ var LINK_ACTIVE = 1;
 
 function nop() {}
 
+function sync(node, lane, handle) {
+  Channel.get(node).sync(node, lane, handle);
+}
+
 function link(node, lane, handle) {
   Channel.get(node).link(node, lane, handle);
 }
@@ -79,7 +83,7 @@ Channel.prototype.send = function (envelope) {
   else this.socket.send(proto.stringify(envelope));
 };
 Channel.prototype.buffer = function (envelope) {
-  if (envelope.isLinkRequest || envelope.isUnlinkRequest) return;
+  if (envelope.isSyncRequest || envelope.isLinkRequest || envelope.isUnlinkRequest) return;
   if (this.sendBuffer.length > options.SEND_BUFFER_SIZE) return; // TODO: Notify
   this.sendBuffer.push(envelope);
 };
@@ -91,7 +95,15 @@ Channel.prototype.onOpen = function () {
   for (var node in this.linkHandles) {
     var nodeHandles = this.linkHandles[node];
     for (var lane in nodeHandles) {
-      envelope = new proto.LinkRequest(this.unresolve(node), lane);
+      var laneHandles = nodeHandles[lane];
+      var synced = false;
+      for (var i = 0, n = laneHandles.length; !synced && i < n; i += 1) {
+        var handle = laneHandles[i];
+        var state = handle.__swim_link_state__;
+        synced = synced || state.synced;
+      }
+      if (synced) envelope = new proto.SyncRequest(this.unresolve(node), lane);
+      else envelope = new proto.LinkRequest(this.unresolve(node), lane);
       this.send(envelope);
     }
   }
@@ -110,9 +122,11 @@ Channel.prototype.onClose = function () {
       var laneHandles = nodeHandles[lane];
       for (var i = 0, n = laneHandles.length; i < n; i += 1) {
         var handle = laneHandles[i];
-        var state = handle.__state__;
+        var state = handle.__swim_link_state__;
         if (state.status === LINK_ACTIVE) {
-          handle.onBroken(node, lane);
+          if (typeof handle.onBroken === 'function') {
+            handle.onBroken.call(handle, node, lane);
+          }
           state.status = LINK_BROKEN;
         }
       }
@@ -136,23 +150,19 @@ Channel.prototype.onFrame = function (frame) {
     if (envelope) this.onReceive(envelope);
   }
 };
-Channel.prototype.link = function (node, lane, handle) {
+Channel.prototype.initHandle = function (handle, synced) {
   if (typeof handle === 'function') handle = {
     onEvent: handle,
     onCommand: handle
   };
-  if (!handle.onEvent) handle.onEvent = nop;
-  if (!handle.onCommand) handle.onCommand = nop;
-  if (!handle.onLinked) handle.onLinked = nop;
-  if (!handle.onUnlinked) handle.onUnlinked = nop;
-  if (!handle.onBroken) handle.onBroken = nop;
-  if (!handle.onUnbroken) handle.onUnbroken = nop;
-  if (!handle.onFailed) handle.onFailed = nop;
   var state = {
-    status: LINK_WANTED
+    status: LINK_WANTED,
+    synced: synced
   };
-  handle.__state__ = state;
-
+  Object.defineProperty(handle, '__swim_link_state__', {value: state, configurable: true});
+  return handle;
+};
+Channel.prototype.registerHandle = function (node, lane, handle) {
   var unlinked = false;
   var nodeHandles = this.linkHandles[node];
   if (nodeHandles === undefined) {
@@ -166,18 +176,9 @@ Channel.prototype.link = function (node, lane, handle) {
     nodeHandles[lane] = laneHandles;
   }
   laneHandles.push(handle);
-
-  if (unlinked) {
-    var request = new proto.LinkRequest(this.unresolve(node), lane);
-    this.send(request);
-    this.linkCount += 1;
-  }
-  else if (this.socket.readyState === this.socket.OPEN) {
-    handle.onLinked(node, lane);
-    state.status = LINK_ACTIVE;
-  }
+  return unlinked;
 };
-Channel.prototype.unlink = function (node, lane, handle) {
+Channel.prototype.unregisterHandle = function (node, lane, handle) {
   var nodeHandles = this.linkHandles[node];
   if (nodeHandles === undefined) return;
   var laneHandles = nodeHandles[lane];
@@ -187,12 +188,43 @@ Channel.prototype.unlink = function (node, lane, handle) {
     if (laneHandles[i].onEvent === handle) { index = i; break; }
   }
   else index = laneHandles.indexOf(handle);
-  if (index < 0) return;
+  if (index < 0) return false;
   laneHandles.splice(index, 1);
-  if (laneHandles.length === 0) {
+  var unlinked = laneHandles.length === 0;
+  if (unlinked) {
     delete nodeHandles[lane];
     if (Object.keys(nodeHandles).length === 0) delete this.linkHandles[node];
-
+  }
+  return unlinked;
+};
+Channel.prototype.sync = function (node, lane, handle) {
+  handle = this.initHandle(handle, true);
+  var unlinked = this.registerHandle(node, lane, handle);
+  var request = new proto.SyncRequest(this.unresolve(node), lane);
+  this.send(request);
+  if (unlinked) {
+    this.linkCount += 1;
+  }
+};
+Channel.prototype.link = function (node, lane, handle) {
+  handle = this.initHandle(handle, false);
+  var unlinked = this.registerHandle(node, lane, handle);
+  if (unlinked) {
+    var request = new proto.LinkRequest(this.unresolve(node), lane);
+    this.send(request);
+    this.linkCount += 1;
+  }
+  else if (this.socket.readyState === this.socket.OPEN) {
+    var state = handle.__swim_link_state__;
+    state.status = LINK_ACTIVE;
+    if (typeof handle.onLinked === 'function') {
+      handle.onLinked.call(handle, node, lane);
+    }
+  }
+};
+Channel.prototype.unlink = function (node, lane, handle) {
+  var unlinked = this.unregisterHandle(node, lane, handle);
+  if (unlinked) {
     var request = new proto.UnlinkRequest(this.unresolve(node), lane);
     this.send(request);
     this.linkCount -= 1;
@@ -205,8 +237,10 @@ Channel.prototype.unlinkAll = function () {
       var laneHandles = nodeHandles[lane];
       for (var i = 0, n = laneHandles.length; i < n; i += 1) {
         var handle = laneHandles[i];
-        var state = handle.__state__;
-        handle.onFailed(node, lane);
+        var state = handle.__swim_link_state__;
+        if (typeof handle.onFailed === 'function') {
+          handle.onFailed.call(handle, node, lane);
+        }
         state.status = LINK_FAILED;
       }
     }
@@ -253,6 +287,7 @@ Channel.prototype.onReceive = function (envelope) {
   if (envelope.isEventMessage) this.onMessage(envelope);
   else if (envelope.isCommandMessage) this.onMessage(envelope);
   else if (envelope.isStateResponse) this.onState(envelope);
+  else if (envelope.isSyncedResponse) this.onSynced(envelope);
   else if (envelope.isLinkedResponse) this.onLinked(envelope);
   else if (envelope.isUnlinkedResponse) this.onUnlinked(envelope);
 };
@@ -266,8 +301,16 @@ Channel.prototype.onMessage = function (envelope) {
     var laneHandles = nodeHandles[lane];
     if (laneHandles) for (var i = 0, n = laneHandles.length; i < n; i += 1) {
       var handle = laneHandles[i];
-      if (envelope.isEventMessage) handle.onEvent(envelope);
-      else handle.onCommand(envelope);
+      if (envelope.isEventMessage) {
+        if (typeof handle.onEvent === 'function') {
+          handle.onEvent.call(handle, envelope);
+        }
+      }
+      else if (envelope.isCommandMessage) {
+        if (typeof handle.onCommand === 'function') {
+          handle.onCommand.call(handle, envelope);
+        }
+      }
     }
     lane = Channel.parentLane(lane);
   }
@@ -281,6 +324,18 @@ Channel.prototype.onState = function (envelope) {
   }
   delete this.stateHandles[node];
 };
+Channel.prototype.onSynced = function (envelope) {
+  var node = URI.resolve(this.node, envelope.node);
+  var lane = envelope.lane;
+  var nodeHandles = this.linkHandles[node];
+  if (nodeHandles === undefined) return;
+  var laneHandles = nodeHandles[lane];
+  if (laneHandles === undefined) return;
+  for (var i = 0, n = laneHandles.length; i < n; i += 1) {
+    var handle = laneHandles[i];
+    handle.onSynced(node, lane);
+  }
+};
 Channel.prototype.onLinked = function (envelope) {
   var node = URI.resolve(this.node, envelope.node);
   var lane = envelope.lane;
@@ -290,9 +345,15 @@ Channel.prototype.onLinked = function (envelope) {
   if (laneHandles === undefined) return;
   for (var i = 0, n = laneHandles.length; i < n; i += 1) {
     var handle = laneHandles[i];
-    var state = handle.__state__;
-    if (state.status === LINK_BROKEN) handle.onUnbroken(node, lane);
-    else handle.onLinked(node, lane);
+    var state = handle.__swim_link_state__;
+    if (state.status === LINK_BROKEN) {
+      if (typeof handle.onUnbroken === 'function') {
+        handle.onUnbroken.call(handle, node, lane);
+      }
+    }
+    else if (typeof handle.onLinked === 'function') {
+      handle.onLinked.call(handle, node, lane);
+    }
     state.status = LINK_ACTIVE;
   }
 };
@@ -305,13 +366,17 @@ Channel.prototype.onUnlinked = function (envelope) {
   if (laneHandles === undefined) return;
   for (var i = 0, n = laneHandles.length; i < n; i += 1) {
     var handle = laneHandles[i];
-    var state = handle.__state__;
+    var state = handle.__swim_link_state__;
     if (state.status === LINK_ACTIVE) {
-      handle.onUnlinked(node, lane);
+      if (typeof handle.onUnlinked === 'function') {
+        handle.onUnlinked.call(handle, node, lane);
+      }
       state.status = LINK_WANTED;
     }
     else {
-      handle.onFailed(node, lane);
+      if (typeof handle.onFailed === 'function') {
+        handle.onFailed.call(handle, node, lane);
+      }
       state.status = LINK_FAILED;
     }
   }
@@ -370,6 +435,7 @@ Channel.parentLane = function (lane) {
 };
 
 
+exports.sync = sync;
 exports.link = link;
 exports.unlink = unlink;
 exports.sendEvent = sendEvent;
