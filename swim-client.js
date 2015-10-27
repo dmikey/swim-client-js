@@ -16,6 +16,10 @@ var LINK_ACTIVE = 1;
 
 function nop() {}
 
+function auth(node, query) {
+  Channel.auth(node, query);
+}
+
 function sync(node, lane, handle) {
   Channel.get(node).sync(node, lane, handle);
 }
@@ -55,9 +59,10 @@ function reset() {
 }
 
 
-function Channel(node) {
+function Channel(node, query) {
   Channel.bridge[node] = this;
   this.node = node;
+  this.query = query;
   this.linkCount = 0;
   this.linkHandles = {};
   this.stateHandles = {};
@@ -68,7 +73,9 @@ function Channel(node) {
   this.open();
 }
 Channel.prototype.open = function () {
-  this.socket = new WS(this.node, 'swim-0.0');
+  var requestUri = this.node;
+  if (this.query) requestUri = requestUri + '?' + this.query;
+  this.socket = new WS(requestUri, 'swim-0.0');
   this.socket.onopen = this.onOpen.bind(this);
   this.socket.onclose = this.onClose.bind(this);
   this.socket.onmessage = this.onFrame.bind(this);
@@ -399,6 +406,12 @@ Channel.get = function (node) {
   if (channel === undefined) channel = new Channel(endpoint);
   return channel;
 };
+Channel.auth = function (node, query) {
+  var endpoint = Channel.endpoint(node);
+  var channel = Channel.bridge[endpoint];
+  if (channel === undefined) channel = new Channel(endpoint, query);
+  return channel;
+};
 Channel.endpoint = function (node) {
   var components = URI.parse(node);
   var scheme = components.scheme;
@@ -435,6 +448,7 @@ Channel.parentLane = function (lane) {
 };
 
 
+exports.auth = auth;
 exports.sync = sync;
 exports.link = link;
 exports.unlink = unlink;

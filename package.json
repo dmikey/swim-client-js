@@ -1,6 +1,6 @@
 {
   "name": "swim-client-js",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Structural Web Integrated Messaging (SWIM) JavaScript Client Implementation",
   "homepage": "https://github.com/web-aware/swim-client-js",
   "author": "Chris Sachs <chris@webaware.com>",
