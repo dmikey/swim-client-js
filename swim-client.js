@@ -118,7 +118,7 @@ Channel.prototype.onOpen = function () {
   while ((envelope = this.sendBuffer.shift())) this.send(envelope);
 };
 Channel.prototype.onClose = function () {
-  if (this.linkCount === 0 && this.sendBuffer.length === 0) {
+  if (!this.closed && this.linkCount === 0 && this.sendBuffer.length === 0) {
     delete Channel.bridge[this.node];
     return;
   }
@@ -409,7 +409,12 @@ Channel.get = function (node) {
 Channel.auth = function (node, query) {
   var endpoint = Channel.endpoint(node);
   var channel = Channel.bridge[endpoint];
-  if (channel === undefined) channel = new Channel(endpoint, query);
+  if (channel) {
+    channel.unlinkAll();
+    channel.close();
+    delete Channel.bridge[endpoint];
+  }
+  channel = new Channel(endpoint, query);
   return channel;
 };
 Channel.endpoint = function (node) {
