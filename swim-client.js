@@ -75,7 +75,7 @@ function Channel(node, query) {
 Channel.prototype.open = function () {
   var requestUri = this.node;
   if (this.query) requestUri = requestUri + '?' + this.query;
-  this.socket = new WS(requestUri, 'swim-0.0');
+  this.socket = new WS(requestUri);
   this.socket.onopen = this.onOpen.bind(this);
   this.socket.onclose = this.onClose.bind(this);
   this.socket.onmessage = this.onFrame.bind(this);

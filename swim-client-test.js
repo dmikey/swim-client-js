@@ -35,7 +35,7 @@ describe('SWIM client', function () {
     });
     socket = {};
     wsServer.on('request', function (request) {
-      var connection = request.accept('swim-0.0', request.origin);
+      var connection = request.accept(request.origin);
       connection.on('message', function (frame) {
         var envelope = proto.parse(frame.utf8Data);
         socket.receive(envelope);
