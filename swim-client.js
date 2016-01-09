@@ -1,20 +1,14 @@
 'use strict';
 
+var config = require('./config.json');
+var recon = require('recon-js');
 var proto = require('swim-proto-js');
-var URI = require('uri-js');
-var WS = require('websocket').w3cwebsocket;
-
-var options = {
-  SEND_BUFFER_SIZE: 1024,
-  MAX_RECONNECT_TIME: 15000
-};
+var WebSocket = global.WebSocket || require('websocket').w3cwebsocket;
 
 var LINK_FAILED = -2;
 var LINK_BROKEN = -1;
 var LINK_WANTED = 0;
 var LINK_ACTIVE = 1;
-
-function nop() {}
 
 function auth(node, query) {
   Channel.auth(node, query);
@@ -40,14 +34,6 @@ function sendCommand(node, lane, body) {
   Channel.get(node).sendCommand(node, lane, body);
 }
 
-function get(node, handle) {
-  Channel.get(node).get(node, handle);
-}
-
-function put(node, body, handle) {
-  Channel.get(node).put(node, body, handle);
-}
-
 function reset() {
   for (var endpoint in Channel.bridge) {
     var channel = Channel.bridge[endpoint];
@@ -65,7 +51,6 @@ function Channel(node, query) {
   this.query = query;
   this.linkCount = 0;
   this.linkHandles = {};
-  this.stateHandles = {};
   this.sendBuffer = [];
   this.reconnectTimeout = null;
   this.reconnectTime = 250 + Math.round(Math.random() * 750);
@@ -75,7 +60,7 @@ function Channel(node, query) {
 Channel.prototype.open = function () {
   var requestUri = this.node;
   if (this.query) requestUri = requestUri + '?' + this.query;
-  this.socket = new WS(requestUri);
+  this.socket = new WebSocket(requestUri);
   this.socket.onopen = this.onOpen.bind(this);
   this.socket.onclose = this.onClose.bind(this);
   this.socket.onmessage = this.onFrame.bind(this);
@@ -91,7 +76,7 @@ Channel.prototype.send = function (envelope) {
 };
 Channel.prototype.buffer = function (envelope) {
   if (envelope.isSyncRequest || envelope.isLinkRequest || envelope.isUnlinkRequest) return;
-  if (this.sendBuffer.length > options.SEND_BUFFER_SIZE) return; // TODO: Notify
+  if (this.sendBuffer.length > config.SEND_BUFFER_SIZE) return; // TODO: Notify
   this.sendBuffer.push(envelope);
 };
 Channel.prototype.onOpen = function () {
@@ -142,7 +127,7 @@ Channel.prototype.onClose = function () {
 
   if (!this.closed) {
     this.reconnectTimeout = setTimeout(this.open.bind(this), this.reconnectTime);
-    this.reconnectTime = Math.min(2 * this.reconnectTime, options.MAX_RECONNECT_TIME);
+    this.reconnectTime = Math.min(2 * this.reconnectTime, config.MAX_RECONNECT_TIME);
   }
 };
 Channel.prototype.onError = function () {
@@ -263,43 +248,15 @@ Channel.prototype.sendCommand = function (node, lane, body) {
   var message = new proto.CommandMessage(this.unresolve(node), lane, undefined, body);
   this.send(message);
 };
-Channel.prototype.get = function (node, handle) {
-  if (typeof handle === 'function') handle = {onState: handle};
-
-  var handles = this.stateHandles[node];
-  if (handles === undefined) {
-    handles = [];
-    this.stateHandles[node] = handles;
-  }
-  handles.push(handle);
-
-  var request = new proto.GetRequest(this.unresolve(node));
-  this.send(request);
-};
-Channel.prototype.put = function (node, body, handle) {
-  if (handle === undefined) handle = nop;
-  if (typeof handle === 'function') handle = {onState: handle};
-
-  var handles = this.stateHandles[node];
-  if (handles === undefined) {
-    handles = [];
-    this.stateHandles[node] = handles;
-  }
-  handles.push(handle);
-
-  var request = new proto.PutRequest(this.unresolve(node), body);
-  this.send(request);
-};
 Channel.prototype.onReceive = function (envelope) {
   if (envelope.isEventMessage) this.onMessage(envelope);
   else if (envelope.isCommandMessage) this.onMessage(envelope);
-  else if (envelope.isStateResponse) this.onState(envelope);
   else if (envelope.isSyncedResponse) this.onSynced(envelope);
   else if (envelope.isLinkedResponse) this.onLinked(envelope);
   else if (envelope.isUnlinkedResponse) this.onUnlinked(envelope);
 };
 Channel.prototype.onMessage = function (envelope) {
-  var node = URI.resolve(this.node, envelope.node);
+  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
   var nodeHandles = this.linkHandles[node];
   if (nodeHandles === undefined) return;
 
@@ -322,17 +279,8 @@ Channel.prototype.onMessage = function (envelope) {
     lane = Channel.parentLane(lane);
   }
 };
-Channel.prototype.onState = function (envelope) {
-  var node = URI.resolve(this.node, envelope.node);
-  var handles = this.stateHandles[node] || [];
-  var handle;
-  while ((handle = handles.shift())) {
-    handle.onState(envelope);
-  }
-  delete this.stateHandles[node];
-};
 Channel.prototype.onSynced = function (envelope) {
-  var node = URI.resolve(this.node, envelope.node);
+  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
   var lane = envelope.lane;
   var nodeHandles = this.linkHandles[node];
   if (nodeHandles === undefined) return;
@@ -340,11 +288,13 @@ Channel.prototype.onSynced = function (envelope) {
   if (laneHandles === undefined) return;
   for (var i = 0, n = laneHandles.length; i < n; i += 1) {
     var handle = laneHandles[i];
-    handle.onSynced(node, lane);
+    if (typeof handle.onLinked === 'function') {
+      handle.onSynced.call(handle, node, lane);
+    }
   }
 };
 Channel.prototype.onLinked = function (envelope) {
-  var node = URI.resolve(this.node, envelope.node);
+  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
   var lane = envelope.lane;
   var nodeHandles = this.linkHandles[node];
   if (nodeHandles === undefined) return;
@@ -365,7 +315,7 @@ Channel.prototype.onLinked = function (envelope) {
   }
 };
 Channel.prototype.onUnlinked = function (envelope) {
-  var node = URI.resolve(this.node, envelope.node);
+  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
   var lane = envelope.lane;
   var nodeHandles = this.linkHandles[node];
   if (nodeHandles === undefined) return;
@@ -392,12 +342,7 @@ Channel.prototype.onUnlinked = function (envelope) {
   this.linkCount -= 1;
 };
 Channel.prototype.unresolve = function (node) {
-  var components = URI.parse(node);
-  return URI.serialize({
-    path: components.path,
-    query: components.query,
-    fragment: components.fragment
-  });
+  return recon.uri.stringify(recon.uri.unresolve(this.node, node));
 };
 Channel.bridge = {};
 Channel.get = function (node) {
@@ -418,37 +363,25 @@ Channel.auth = function (node, query) {
   return channel;
 };
 Channel.endpoint = function (node) {
-  var components = URI.parse(node);
+  var components = recon.uri.parse(node);
   var scheme = components.scheme;
-  if (scheme === 'swim') scheme = 'http';
-  else if (scheme === 'swims') scheme = 'https';
-  return URI.serialize({
+  if (scheme === 'swim') scheme = 'ws';
+  else if (scheme === 'swims') scheme = 'wss';
+  return recon.uri.stringify({
     scheme: scheme,
-    userinfo: components.userinfo,
-    host: components.host,
-    port: components.port
+    authority: components.authority
   });
 };
 Channel.parentLane = function (lane) {
-  var components = URI.parse(lane);
+  var components = recon.uri.parse(lane);
   var path = components.path;
-  if (components.query && components.fragment) return URI.serialize({
+  if (components.query && components.fragment) return recon.uri.stringify({
     path: path,
     query: components.query
   });
-  else if (components.query) return URI.serialize({path: path});
+  else if (components.query) return recon.uri.stringify({path: path});
   else if (path.length > 0) {
-    if (path.charCodeAt(path.length - 1) === 47 /*'/'*/) {
-      path = path.substring(0, path.length - 1);
-      return URI.serialize({path: path});
-    }
-    else {
-      var i = path.lastIndexOf('/');
-      if (i > 0) {
-        path = path.substring(0, i + 1);
-        return URI.serialize({path: path});
-      }
-    }
+    return recon.uri.stringify({path: path.slice(0, path.length - 1)});
   }
 };
 
@@ -459,7 +392,5 @@ exports.link = link;
 exports.unlink = unlink;
 exports.sendEvent = sendEvent;
 exports.sendCommand = sendCommand;
-exports.get = get;
-exports.put = put;
 exports.reset = reset;
-exports.options = options;
+exports.config = config;

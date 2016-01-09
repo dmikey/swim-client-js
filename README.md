@@ -1,4 +1,4 @@
-# Structural Web Integrated Messaging (SWIM) Client
+# SWIM Client Javascript Implementation
 
 ## JavaScript Library
 
@@ -47,18 +47,6 @@ swim.link('http://iot.example.com/house#kitchen', 'light', handle);
 swim.unlink('http://iot.example.com/house#kitchen', 'light', handle);
 ```
 
-#### swim.sendEvent(node_uri, lane_uri, message)
-
-Dispatch `message` to `node_uri` on `lane_uri` as an event.  The endpoint
-responsible for `node_uri` will propagate the event up the data model.
-As usual, the SWIM client takes care of maintaining multiplexed channels
-to all active endpoints.
-
-```js
-swim.sendEvent('http://iot.example.com/house#kitchen/toaster', 'toaster/done',
-  recon.parse('@toasted' { items: 2 }));
-```
-
 #### swim.sendCommand(node_uri, lane_uri, message)
 
 Dispatch `message` to `node_uri` on `lane_uri` as a command.  The endpoint
@@ -70,22 +58,15 @@ endpoints.
 swim.sendCommand('http://iot.example.com/house', 'light/off');
 ```
 
-#### swim.get(node_uri, handle)
 
-Fetch the data model at `node_uri`.
+#### swim.sendEvent(node_uri, lane_uri, message)
 
-```js
-swim.get('http://iot.example.com/house', function (response) {
-  console.log('model: '+ response.body);
-});
-```
-
-#### swim.put(node_uri, content, handle);
-
-Update the data model at `node_uri` with RECON `content`.
+Dispatch `message` to `node_uri` on `lane_uri` as an event.  The endpoint
+responsible for `node_uri` will propagate the event up the data model.
+As usual, the SWIM client takes care of maintaining multiplexed channels
+to all active endpoints.
 
 ```js
-swim.put('http://iot.example.com/house', recon.parse('living: @room'), function (response) {
-  console.log('updated model: '+ response.body);
-});
+swim.sendEvent('http://iot.example.com/house#kitchen/toaster', 'toaster/done',
+  recon.parse('@toasted' { items: 2 }));
 ```
