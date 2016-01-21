@@ -155,6 +155,55 @@ describe('SWIM client', function () {
     swim.sync(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
   });
 
+  it('should proxy link node lanes', function (done) {
+    var record = recon.parse('@gateway');
+    socket.receive = function (request) {
+      if (request.isLinkRequest && request.node === 'swim:meta:router' && request.lane === 'gateway/info') {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', undefined, record));
+      }
+    };
+    swim.proxyLink(endpoint, 'swim:meta:router', 'gateway/info', function (response) {
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      assert.same(response.body, record);
+      done();
+    });
+  });
+
+  it('should proxy sync node lanes', function (done) {
+    var record = recon.parse('@gateway');
+    socket.receive = function (request) {
+      if (request.isSyncRequest && request.node === 'swim:meta:router' && request.lane === 'gateway/info') {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', undefined, record));
+        socket.send(new proto.SyncedResponse(request.node, request.lane));
+      }
+    };
+    var linked = false;
+    var received = false;
+    function onLinked() {
+      linked = true;
+    }
+    function onEvent(response) {
+      received = true;
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      assert.same(response.body, record);
+    }
+    function onSynced() {
+      assert(linked);
+      assert(received);
+      done();
+    }
+    var handle = {
+      onLinked: onLinked,
+      onEvent: onEvent,
+      onSynced: onSynced
+    };
+    swim.proxySync(endpoint, 'swim:meta:router', 'gateway/info', handle);
+  });
+
   it('should handle coincident links', function (done) {
     var record = recon.parse('@switch { level: 100 }');
     var linkCount = 0;

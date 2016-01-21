@@ -22,6 +22,14 @@ function link(node, lane, handle) {
   Channel.get(node).link(node, lane, handle);
 }
 
+function proxySync(proxy, node, lane, handle) {
+  Channel.get(proxy).sync(node, lane, handle);
+}
+
+function proxyLink(proxy, node, lane, handle) {
+  Channel.get(proxy).link(node, lane, handle);
+}
+
 function unlink(node, lane, handle) {
   Channel.get(node).unlink(node, lane, handle);
 }
@@ -389,6 +397,8 @@ Channel.parentLane = function (lane) {
 exports.auth = auth;
 exports.sync = sync;
 exports.link = link;
+exports.proxySync = proxySync;
+exports.proxyLink = proxyLink;
 exports.unlink = unlink;
 exports.sendEvent = sendEvent;
 exports.sendCommand = sendCommand;
