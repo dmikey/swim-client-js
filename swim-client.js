@@ -22,14 +22,6 @@ function link(node, lane, handle) {
   Channel.get(node).link(node, lane, handle);
 }
 
-function proxySync(proxy, node, lane, handle) {
-  Channel.get(proxy).sync(node, lane, handle);
-}
-
-function proxyLink(proxy, node, lane, handle) {
-  Channel.get(proxy).link(node, lane, handle);
-}
-
 function unlink(node, lane, handle) {
   Channel.get(node).unlink(node, lane, handle);
 }
@@ -40,6 +32,22 @@ function sendEvent(node, lane, body) {
 
 function sendCommand(node, lane, body) {
   Channel.get(node).sendCommand(node, lane, body);
+}
+
+function proxySync(proxy, node, lane, handle) {
+  Channel.get(proxy).sync(node, lane, handle);
+}
+
+function proxyLink(proxy, node, lane, handle) {
+  Channel.get(proxy).link(node, lane, handle);
+}
+
+function sendProxyEvent(proxy, node, lane, body) {
+  Channel.get(proxy).sendEvent(node, lane, body);
+}
+
+function sendProxyCommand(proxy, node, lane, body) {
+  Channel.get(proxy).sendCommand(node, lane, body);
 }
 
 function reset() {
@@ -397,10 +405,12 @@ Channel.parentLane = function (lane) {
 exports.auth = auth;
 exports.sync = sync;
 exports.link = link;
-exports.proxySync = proxySync;
-exports.proxyLink = proxyLink;
 exports.unlink = unlink;
 exports.sendEvent = sendEvent;
 exports.sendCommand = sendCommand;
+exports.proxySync = proxySync;
+exports.proxyLink = proxyLink;
+exports.sendProxyEvent = sendProxyEvent;
+exports.sendProxyCommand = sendProxyCommand;
 exports.reset = reset;
 exports.config = config;

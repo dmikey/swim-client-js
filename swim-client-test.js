@@ -405,6 +405,32 @@ describe('SWIM client', function () {
     swim.sendCommand(resolve(endpoint, 'house'), 'light/off', record);
   });
 
+  it('should send proxied events', function (done) {
+    var record = recon.parse('@gateway');
+    socket.receive = function (message) {
+      if (message.isEventMessage) {
+        assert.equal(message.node, 'swim:meta:router');
+        assert.equal(message.lane, 'gateway/info');
+        assert.same(message.body, record);
+        done();
+      }
+    };
+    swim.sendProxyEvent(endpoint, 'swim:meta:router', 'gateway/info', record);
+  });
+
+  it('should send proxied commands', function (done) {
+    var record = recon.parse('@gateway');
+    socket.receive = function (message) {
+      if (message.isCommandMessage) {
+        assert.equal(message.node, 'swim:meta:router');
+        assert.equal(message.lane, 'gateway/info');
+        assert.same(message.body, record);
+        done();
+      }
+    };
+    swim.sendProxyCommand(endpoint, 'swim:meta:router', 'gateway/info', record);
+  });
+
   it('should buffer a limited number of sends', function (done) {
     var record = recon.parse('@switch { level: 100 }');
     socket.receive = function (message) {};
