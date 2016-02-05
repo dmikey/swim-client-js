@@ -25,6 +25,7 @@ var uglify = require('gulp-uglify');
 
 var devel = args.devel || false;
 var debug = args.debug || devel; // --devel implies --debug
+var proto = args.proto;
 
 //
 // Paths
@@ -46,6 +47,7 @@ function generatedConfig() {
     SEND_BUFFER_SIZE: 1024,
     MAX_RECONNECT_TIME: 15000
   };
+  if (proto) config.proto = proto;
   fs.writeFileSync(configFile, JSON.stringify(config));
   return gulp.src(configFile);
 }
