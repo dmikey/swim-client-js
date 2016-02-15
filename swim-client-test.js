@@ -17,71 +17,83 @@ assert.same = function (x, y) {
   }
 };
 
-function resolve(base, relative) {
-  return recon.uri.stringify(recon.uri.resolve(base, relative));
+function TestFixture() {
+  this.hostUri = 'http://localhost:8009';
+}
+TestFixture.prototype.start = function (done) {
+  var test = this;
+  test.httpServer = http.createServer();
+  test.httpServer.listen(8009, function () {
+    done();
+  });
+  test.wsServer = new WebSocket.server({
+    httpServer: test.httpServer
+  });
+  test.client = swim.client();
+  test.wsServer.on('request', function (request) {
+    test.connection = request.accept(request.origin);
+    test.connection.on('message', function (frame) {
+      var envelope = proto.parse(frame.utf8Data);
+      test.receive(envelope);
+    });
+    test.send = function (envelope) {
+      var payload = proto.stringify(envelope);
+      test.connection.sendUTF(payload);
+    };
+    test.sendText = function (string) {
+      test.connection.sendUTF(string);
+    };
+    test.sendBytes = function (buffer) {
+      test.connection.sendBytes(buffer);
+    };
+    test.close = function () {
+      test.connection.close();
+      test.connection = undefined;
+    };
+  });
+};
+TestFixture.prototype.stop = function (done) {
+  var test = this;
+  if (test.client) test.client.close();
+  if (test.connection) test.connection.close();
+  test.wsServer.shutDown();
+  test.httpServer.close(function () {
+    test.client = null;
+    test.connection = null;
+    test.wsServer = null;
+    test.httpServer = null;
+    done();
+  });
+};
+TestFixture.prototype.resolve = function (nodeUri) {
+  return recon.uri.stringify(recon.uri.resolve(this.hostUri, nodeUri));
+};
+
+var test = null;
+function initSuite(suite) {
+  suite.timeout(5000);
+  suite.slow(5000);
+  beforeEach(function (done) {
+    test = new TestFixture();
+    test.start(done);
+  });
+  afterEach(function (done) {
+    test.stop(function () {
+      test = null;
+      done();
+    });
+  });
 }
 
 
-describe('Swim Client', function () {
-  this.timeout(5000);
-  this.slow(5000);
-
-  var httpServer, wsServer, connection, socket, client;
-  var hostUri = 'http://localhost:8009';
-
-  beforeEach(function (done) {
-    httpServer = http.createServer();
-    httpServer.listen(8009, function () {
-      done();
-    });
-    wsServer = new WebSocket.server({
-      httpServer: httpServer
-    });
-    socket = {};
-    client = swim.client();
-    wsServer.on('request', function (request) {
-      var connection = request.accept(request.origin);
-      connection.on('message', function (frame) {
-        var envelope = proto.parse(frame.utf8Data);
-        socket.receive(envelope);
-      });
-      socket.send = function (envelope) {
-        var payload = proto.stringify(envelope);
-        connection.sendUTF(payload);
-      };
-      socket.sendText = function (string) {
-        connection.sendUTF(string);
-      };
-      socket.sendBytes = function (buffer) {
-        connection.sendBytes(buffer);
-      };
-      socket.close = function () {
-        connection.close();
-        connection = undefined;
-      };
-    });
-  });
-
-  afterEach(function (done) {
-    if (client) client.close();
-    if (connection) connection.close();
-    wsServer.shutDown();
-    httpServer.close(function () {
-      client = undefined;
-      socket = undefined;
-      connection = undefined;
-      wsServer = undefined;
-      httpServer = undefined;
-      done();
-    });
-  });
-
+describe('Client', function () {
+  initSuite(this);
 
   it('should create a link through a client scope', function () {
     var options = {prio: 0.5};
-    var downlink = client.link(hostUri, 'house/kitchen#light', 'light/on', options);
-    assert.equal(downlink.hostUri, hostUri);
-    assert.equal(downlink.nodeUri, resolve(hostUri, 'house/kitchen#light'));
+    var downlink = test.client.link(test.hostUri, 'house/kitchen#light', 'light/on', options);
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
     assert.equal(downlink.laneUri, 'light/on');
     assert.equal(downlink.prio, 0.5);
     assert(!downlink.keepAlive);
@@ -91,18 +103,18 @@ describe('Swim Client', function () {
 
   it('should create a synchronized link through a client scope', function () {
     var options = {prio: 0.5};
-    var downlink = client.sync(hostUri, 'house/kitchen#light', 'light/on', options);
-    assert.equal(downlink.hostUri, hostUri);
-    assert.equal(downlink.nodeUri, resolve(hostUri, 'house/kitchen#light'));
+    var downlink = test.client.sync(test.hostUri, 'house/kitchen#light', 'light/on', options);
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
     assert.equal(downlink.laneUri, 'light/on');
     assert.equal(downlink.prio, 0.5);
     assert(!downlink.keepAlive);
     assert.equal(downlink.options, options);
     assert.equal(downlink.delegate, downlink);
 
-    downlink = client.sync(resolve(hostUri, 'house/kitchen#light'), 'light/on', options);
-    assert.equal(downlink.hostUri, hostUri);
-    assert.equal(downlink.nodeUri, resolve(hostUri, 'house/kitchen#light'));
+    downlink = test.client.sync(test.resolve('house/kitchen#light'), 'light/on', options);
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
     assert.equal(downlink.laneUri, 'light/on');
     assert.equal(downlink.prio, 0.5);
     assert(!downlink.keepAlive);
@@ -111,14 +123,14 @@ describe('Swim Client', function () {
   });
 
   it('should link a lane through a client scope', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
-    socket.receive = function (request) {
+    var nodeUri = test.resolve('house/kitchen#light');
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var downlink = client.link(nodeUri, 'light/on');
+    var downlink = test.client.link(nodeUri, 'light/on');
     var linkCount = 0;
     downlink.onLink = function (request) {
       linkCount += 1;
@@ -134,16 +146,16 @@ describe('Swim Client', function () {
   });
 
   it('should receive an event from a link through a client scope', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var nodeUri = test.resolve('house/kitchen#light');
     var body = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
     };
-    var downlink = client.link(nodeUri, 'light/on');
+    var downlink = test.client.link(nodeUri, 'light/on');
     downlink.onEvent = function (message) {
       assert.equal(message.node, nodeUri);
       assert.equal(message.lane, 'light/on');
@@ -153,17 +165,17 @@ describe('Swim Client', function () {
   });
 
   it('should sync a lane through a client scope', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var nodeUri = test.resolve('house/kitchen#light');
     var body = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var downlink = client.sync(nodeUri, 'light/on');
+    var downlink = test.client.sync(nodeUri, 'light/on');
     var state = 0;
     downlink.onSync = function (request) {
       assert.equal(state, 0);
@@ -187,14 +199,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a lane through a client scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     downlink.onLinked = function (response) {
       downlink.close();
     };
@@ -207,24 +219,24 @@ describe('Swim Client', function () {
 
   it('should command a lane through a client scope', function (done) {
     var body = recon.parse('@switch { level: 0 }');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'house');
       assert.equal(message.lane, 'light/off');
       assert.same(message.body, body);
       done();
     };
-    client.command(resolve(hostUri, 'house'), 'light/off', body);
+    test.client.command(test.resolve('house'), 'light/off', body);
   });
 
   it('should link a meta lane through a client scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var downlink = client.link(hostUri, 'swim:meta:router', 'gateway/info');
+    var downlink = test.client.link(test.hostUri, 'swim:meta:router', 'gateway/info');
     var linkCount = 0;
     downlink.onLink = function (request) {
       linkCount += 1;
@@ -241,14 +253,14 @@ describe('Swim Client', function () {
 
   it('should receive an event from a meta link through a client scope', function (done) {
     var body = recon.parse('@gateway');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
     };
-    var downlink = client.link(hostUri, 'swim:meta:router', 'gateway/info');
+    var downlink = test.client.link(test.hostUri, 'swim:meta:router', 'gateway/info');
     downlink.onEvent = function (message) {
       assert.equal(message.node, 'swim:meta:router');
       assert.equal(message.lane, 'gateway/info');
@@ -259,15 +271,15 @@ describe('Swim Client', function () {
 
   it('should sync a meta lane through a client scope', function (done) {
     var body = recon.parse('@gateway');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var downlink = client.sync(hostUri, 'swim:meta:router', 'gateway/info');
+    var downlink = test.client.sync(test.hostUri, 'swim:meta:router', 'gateway/info');
     var state = 0;
     downlink.onSync = function (request) {
       assert.equal(state, 0);
@@ -291,14 +303,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a meta lane through a client scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var downlink = client.link(hostUri, 'swim:meta:router', 'gateway/info');
+    var downlink = test.client.link(test.hostUri, 'swim:meta:router', 'gateway/info');
     downlink.onLinked = function (response) {
       downlink.close();
     };
@@ -311,30 +323,34 @@ describe('Swim Client', function () {
 
   it('should command a meta lane through a client scope', function (done) {
     var body = recon.parse('@gateway');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'swim:meta:router');
       assert.equal(message.lane, 'gateway/info');
       assert.same(message.body, body);
       done();
     };
-    client.command(hostUri, 'swim:meta:router', 'gateway/info', body);
+    test.client.command(test.hostUri, 'swim:meta:router', 'gateway/info', body);
   });
+});
 
+
+describe('HostScope', function () {
+  initSuite(this);
 
   it('should create a host scope from a client scope', function () {
-    var host = client.host(hostUri);
-    assert.equal(host.hostUri, hostUri);
+    var host = test.client.host(test.hostUri);
+    assert.equal(host.hostUri, test.hostUri);
   });
 
   it('should link a lane through a host scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.link('house/kitchen#light', 'light/on');
     var linkCount = 0;
     downlink.onLink = function (request) {
@@ -344,24 +360,24 @@ describe('Swim Client', function () {
     };
     downlink.onLinked = function (response) {
       assert.equal(linkCount, 1);
-      assert.equal(response.node, resolve(hostUri, 'house/kitchen#light'));
+      assert.equal(response.node, test.resolve('house/kitchen#light'));
       assert.equal(response.lane, 'light/on');
       done();
     };
   });
 
   it('should sync a lane through a host scope', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var nodeUri = test.resolve('house/kitchen#light');
     var body = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.sync('house/kitchen#light', 'light/on');
     var state = 0;
     downlink.onSync = function (request) {
@@ -386,14 +402,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a lane through a host scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.link('house/kitchen#light', 'light/on');
     downlink.onLinked = function (response) {
       downlink.close();
@@ -407,25 +423,25 @@ describe('Swim Client', function () {
 
   it('should command a lane through a host scope', function (done) {
     var body = recon.parse('@switch { level: 0 }');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'house');
       assert.equal(message.lane, 'light/off');
       assert.same(message.body, body);
       done();
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     host.command('house', 'light/off', body);
   });
 
   it('should link a meta lane through a host scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.link('swim:meta:router', 'gateway/info');
     var linkCount = 0;
     downlink.onLink = function (request) {
@@ -442,17 +458,17 @@ describe('Swim Client', function () {
   });
 
   it('should sync a meta lane through a host scope', function (done) {
-    var nodeUri = resolve(hostUri, 'swim:meta:router');
+    var nodeUri = test.resolve('swim:meta:router');
     var body = recon.parse('@gateway');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.sync('swim:meta:router', 'gateway/info');
     var state = 0;
     downlink.onSync = function (request) {
@@ -477,14 +493,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a meta lane through a host scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.link('swim:meta:router', 'gateway/info');
     downlink.onLinked = function (response) {
       downlink.close();
@@ -498,23 +514,23 @@ describe('Swim Client', function () {
 
   it('should command a meta lane through a host scope', function (done) {
     var body = recon.parse('@gateway');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'swim:meta:router');
       assert.equal(message.lane, 'gateway/info');
       assert.same(message.body, body);
       done();
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     host.command('swim:meta:router', 'gateway/info', body);
   });
 
   it('should close all member links when a host scope closes', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var linkCount = 0;
     var closeCount = 0;
     function onLink(request) {
@@ -532,41 +548,45 @@ describe('Swim Client', function () {
     downlink2.onLink = onLink;
     downlink2.onClose = onClose;
   });
+});
 
+
+describe('NodeScope', function () {
+  initSuite(this);
 
   it('should create a node scope from a client scope', function () {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
-    var node1 = client.node(hostUri, 'house/kitchen#light');
-    var node2 = client.node(nodeUri);
-    assert.equal(node1.hostUri, hostUri);
+    var nodeUri = test.resolve('house/kitchen#light');
+    var node1 = test.client.node(test.hostUri, 'house/kitchen#light');
+    var node2 = test.client.node(nodeUri);
+    assert.equal(node1.hostUri, test.hostUri);
     assert.equal(node1.nodeUri, nodeUri);
-    assert.equal(node2.hostUri, hostUri);
+    assert.equal(node2.hostUri, test.hostUri);
     assert.equal(node2.nodeUri, nodeUri);
   });
 
   it('should create a node scope from a host scope', function () {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
-    var host = client.host(hostUri);
+    var nodeUri = test.resolve('house/kitchen#light');
+    var host = test.client.host(test.hostUri);
     var node = host.node('house/kitchen#light');
-    assert.equal(node.hostUri, hostUri);
+    assert.equal(node.hostUri, test.hostUri);
     assert.equal(node.nodeUri, nodeUri);
   });
 
   it('should rewrite swim URI schemes in host URIs extracted from node URIs', function () {
-    var node1 = client.node('swim://example.com/');
+    var node1 = test.client.node('swim://example.com/');
     assert.equal(node1.hostUri, 'ws://example.com');
-    var node2 = client.node('swims://example.com/');
+    var node2 = test.client.node('swims://example.com/');
     assert.equal(node2.hostUri, 'wss://example.com');
   });
 
   it('should link a lane through a node scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var node = client.node(hostUri, 'house/kitchen#light');
+    var node = test.client.node(test.hostUri, 'house/kitchen#light');
     var downlink = node.link('light/on');
     var linkCount = 0;
     downlink.onLink = function (request) {
@@ -576,24 +596,24 @@ describe('Swim Client', function () {
     };
     downlink.onLinked = function (response) {
       assert.equal(linkCount, 1);
-      assert.equal(response.node, resolve(hostUri, 'house/kitchen#light'));
+      assert.equal(response.node, test.resolve('house/kitchen#light'));
       assert.equal(response.lane, 'light/on');
       done();
     };
   });
 
   it('should sync a lane through a node scope', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var nodeUri = test.resolve('house/kitchen#light');
     var body = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var node = client.node(hostUri, 'house/kitchen#light');
+    var node = test.client.node(test.hostUri, 'house/kitchen#light');
     var downlink = node.sync('light/on');
     var state = 0;
     downlink.onSync = function (request) {
@@ -618,14 +638,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a lane through a node scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var node = client.node(hostUri, 'house/kitchen#light');
+    var node = test.client.node(test.hostUri, 'house/kitchen#light');
     var downlink = node.link('light/on');
     downlink.onLinked = function (response) {
       downlink.close();
@@ -639,25 +659,25 @@ describe('Swim Client', function () {
 
   it('should command a lane through a node scope', function (done) {
     var body = recon.parse('@switch { level: 0 }');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'house');
       assert.equal(message.lane, 'light/off');
       assert.same(message.body, body);
       done();
     };
-    var node = client.node(hostUri, 'house');
+    var node = test.client.node(test.hostUri, 'house');
     node.command('light/off', body);
   });
 
   it('should link a lane through a meta node scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var node = client.node(hostUri, 'swim:meta:router');
+    var node = test.client.node(test.hostUri, 'swim:meta:router');
     var downlink = node.link('gateway/info');
     var linkCount = 0;
     downlink.onLink = function (request) {
@@ -674,17 +694,17 @@ describe('Swim Client', function () {
   });
 
   it('should sync a lane through a meta node scope', function (done) {
-    var nodeUri = resolve(hostUri, 'swim:meta:router');
+    var nodeUri = test.resolve('swim:meta:router');
     var body = recon.parse('@gateway');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'swim:meta:router');
       assert.equal(request.lane, 'gateway/info');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var node = client.node(hostUri, 'swim:meta:router');
+    var node = test.client.node(test.hostUri, 'swim:meta:router');
     var downlink = node.sync('gateway/info');
     var state = 0;
     downlink.onSync = function (request) {
@@ -709,14 +729,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a lane through a meta node scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var node = client.node(hostUri, 'swim:meta:router');
+    var node = test.client.node(test.hostUri, 'swim:meta:router');
     var downlink = node.link('gateway/info');
     downlink.onLinked = function (response) {
       downlink.close();
@@ -730,23 +750,23 @@ describe('Swim Client', function () {
 
   it('should command a lane through a meta node scope', function (done) {
     var body = recon.parse('@gateway');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'swim:meta:router');
       assert.equal(message.lane, 'gateway/info');
       assert.same(message.body, body);
       done();
     };
-    var node = client.node(hostUri, 'swim:meta:router');
+    var node = test.client.node(test.hostUri, 'swim:meta:router');
     node.command('gateway/info', body);
   });
 
   it('should close all member links when a node scope closes', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var node = client.node(hostUri, 'house/kitchen#light');
+    var node = test.client.node(test.hostUri, 'house/kitchen#light');
     var linkCount = 0;
     var closeCount = 0;
     function onLink(request) {
@@ -764,46 +784,50 @@ describe('Swim Client', function () {
     downlink2.onLink = onLink;
     downlink2.onClose = onClose;
   });
+});
 
+
+describe('LaneScope', function () {
+  initSuite(this);
 
   it('should create a lane scope from a client scope', function () {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
-    var lane1 = client.lane(hostUri, 'house/kitchen#light', 'light/on');
-    var lane2 = client.lane(nodeUri, 'light/on');
-    assert.equal(lane1.hostUri, hostUri);
+    var nodeUri = test.resolve('house/kitchen#light');
+    var lane1 = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
+    var lane2 = test.client.lane(nodeUri, 'light/on');
+    assert.equal(lane1.hostUri, test.hostUri);
     assert.equal(lane1.nodeUri, nodeUri);
     assert.equal(lane1.laneUri, 'light/on');
-    assert.equal(lane2.hostUri, hostUri);
+    assert.equal(lane2.hostUri, test.hostUri);
     assert.equal(lane2.nodeUri, nodeUri);
     assert.equal(lane2.laneUri, 'light/on');
   });
 
   it('should create a lane scope from a host scope', function () {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
-    var host = client.host(hostUri);
+    var nodeUri = test.resolve('house/kitchen#light');
+    var host = test.client.host(test.hostUri);
     var lane = host.lane('house/kitchen#light', 'light/on');
-    assert.equal(lane.hostUri, hostUri);
+    assert.equal(lane.hostUri, test.hostUri);
     assert.equal(lane.nodeUri, nodeUri);
     assert.equal(lane.laneUri, 'light/on');
   });
 
   it('should create a lane scope from a node scope', function () {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
-    var node = client.node(nodeUri);
+    var nodeUri = test.resolve('house/kitchen#light');
+    var node = test.client.node(nodeUri);
     var lane = node.lane('light/on');
-    assert.equal(lane.hostUri, hostUri);
+    assert.equal(lane.hostUri, test.hostUri);
     assert.equal(lane.nodeUri, nodeUri);
     assert.equal(lane.laneUri, 'light/on');
   });
 
   it('should link a lane through a lane scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var lane = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
     var downlink = lane.link();
     var linkCount = 0;
     downlink.onLink = function (request) {
@@ -813,24 +837,24 @@ describe('Swim Client', function () {
     };
     downlink.onLinked = function (response) {
       assert.equal(linkCount, 1);
-      assert.equal(response.node, resolve(hostUri, 'house/kitchen#light'));
+      assert.equal(response.node, test.resolve('house/kitchen#light'));
       assert.equal(response.lane, 'light/on');
       done();
     };
   });
 
   it('should sync a lane through a lane scope', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var nodeUri = test.resolve('house/kitchen#light');
     var body = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isSyncRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
-      socket.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var lane = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
     var downlink = lane.sync();
     var state = 0;
     downlink.onSync = function (request) {
@@ -855,14 +879,14 @@ describe('Swim Client', function () {
   });
 
   it('should unlink a lane through a lane scope', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       } else if (request.isUnlinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var lane = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
     var downlink = lane.link();
     downlink.onLinked = function (response) {
       downlink.close();
@@ -876,23 +900,23 @@ describe('Swim Client', function () {
 
   it('should command a lane through a lane scope', function (done) {
     var body = recon.parse('@switch { level: 0 }');
-    socket.receive = function (message) {
+    test.receive = function (message) {
       assert(message.isCommandMessage);
       assert.equal(message.node, 'house');
       assert.equal(message.lane, 'light/off');
       assert.same(message.body, body);
       done();
     };
-    var lane = client.lane(hostUri, 'house', 'light/off');
+    var lane = test.client.lane(test.hostUri, 'house', 'light/off');
     lane.command(body);
   });
 
   it('should close all member links when a lane scope closes', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var lane = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
     var linkCount = 0;
     var closeCount = 0;
     function onLink(request) {
@@ -910,76 +934,54 @@ describe('Swim Client', function () {
     downlink2.onLink = onLink;
     downlink2.onClose = onClose;
   });
+});
 
+
+describe('MapDownlink', function () {
+  initSuite(this);
 
   it('should create a synchronized map link through a client scope', function () {
-    var downlink = client.syncMap(hostUri, 'chat/public', 'chat/users');
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     assert.same(downlink.size, 0);
     assert.same(downlink.state, []);
-    downlink = client.syncMap(resolve(hostUri, 'chat/public'), 'chat/users');
+    downlink = test.client.syncMap(test.resolve('chat/public'), 'chat/users');
     assert.same(downlink.size, 0);
     assert.same(downlink.state, []);
   });
 
   it('should create a synchronized map link through a host scope', function () {
-    var host = client.host(hostUri);
+    var host = test.client.host(test.hostUri);
     var downlink = host.syncMap('chat/public', 'chat/users');
     assert.same(downlink.size, 0);
     assert.same(downlink.state, []);
   });
 
   it('should create a synchronized map link through a node scope', function () {
-    var node = client.node(hostUri, 'chat/public');
+    var node = test.client.node(test.hostUri, 'chat/public');
     var downlink = node.syncMap('chat/users');
     assert.same(downlink.size, 0);
     assert.same(downlink.state, []);
   });
 
   it('should create a synchronized map link through a lane scope', function () {
-    var lane = client.lane(hostUri, 'chat/public', 'chat/users');
+    var lane = test.client.lane(test.hostUri, 'chat/public', 'chat/users');
     var downlink = lane.syncMap();
     assert.same(downlink.size, 0);
     assert.same(downlink.state, []);
   });
 
-  it('should sync a map lane', function (done) {
-    var commandCount = 0;
-    socket.receive = function (message) {
-      if (message.isSyncRequest) {
-        socket.send(new proto.LinkedResponse(message.node, message.lane));
-        socket.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
-        socket.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
-        socket.send(new proto.SyncedResponse(message.node, message.lane));
-      } else if (message.isCommandMessage) {
-        commandCount += 1;
-        if (commandCount === 1) {
-          socket.send(new proto.EventMessage(message.node, message.lane, message.body));
-        } else if (commandCount === 2) {
-          socket.send(new proto.EventMessage(message.node, message.lane,
-            [{'@remove': null}, {id: 'a'}, {name: 'baz'}]));
-        }
-      }
+  it('should sync a map lane with a primaryKey function', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    function primaryKey(user) { return user.id; }
-    var downlink = client.syncMap(hostUri, 'chat/public', 'chat/users', primaryKey);
-    var state = 0;
-    downlink.onEvent = function (message) {
-      if (state === 1) {
-        state = 2;
-        assert.same(downlink.get('a'), [{id: 'a'}, {name: 'baz'}]);
-        downlink.delete('a');
-      } else if (state === 2) {
-        assert(!downlink.has('a'));
-        assert.same(downlink.get('a'), undefined);
-        downlink.forEach(function (value, key) {
-          assert.same(value, [{id: 'b'}, {name: 'bar'}]);
-          assert.same(key, 'b');
-        });
-        done();
-      }
-    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: function (user) { return recon.get(user, 'id'); }
+    });
     downlink.onSynced = function (response) {
-      state = 1;
       assert.same(downlink.size, 2);
       assert(downlink.has('a'));
       assert(downlink.has('b'));
@@ -989,36 +991,419 @@ describe('Swim Client', function () {
       assert.same(downlink.get('c'), undefined);
       assert.same(downlink.keys(), ['a', 'b']);
       assert.same(downlink.values(), [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
-      downlink.set('a', [{id: 'a'}, {name: 'baz'}]);
+      done();
+    };
+  });
+
+  it('should sync a map lane with no primary key', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
+    downlink.onSynced = function (response) {
+      assert.same(downlink.size, 2);
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'a'}, {name: 'bar'}]]);
+      done();
+    };
+  });
+
+  it('should sync a map lane with non-string keys', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{id: 9}, {name: 'nine'}]));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{id: 4}, {name: 'four'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    downlink.onSynced = function (response) {
+      assert(downlink.has(9));
+      assert(downlink.has(4));
+      assert(!downlink.has(3));
+      assert.same(downlink.get(9), [{id: 9}, {name: 'nine'}]);
+      assert.same(downlink.get(4), [{id: 4}, {name: 'four'}]);
+      assert.same(downlink.get(3), undefined);
+      done();
+    };
+  });
+
+  it('should sort a synchronized map link by comparison function', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id',
+      sortBy: function (x, y) {
+        return recon.compare(recon.get(x, 'name'), recon.get(y, 'name'));
+      }
+    });
+    downlink.onSynced = function (response) {
+      assert.same(downlink.state, [[{id: 'b'}, {name: 'bar'}], [{id: 'a'}, {name: 'foo'}]]);
+      done();
+    };
+  });
+
+  it('should sort a synchronized map link by value path', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id',
+      sortBy: 'name'
+    });
+    downlink.onSynced = function (response) {
+      assert.same(downlink.state, [[{id: 'b'}, {name: 'bar'}], [{id: 'a'}, {name: 'foo'}]]);
+      done();
+    };
+  });
+
+  it('should insert new synchronized map link values', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}]]);
+      downlink.set('b', [{id: 'b'}, {name: 'bar'}]);
     };
     downlink.onCommand = function (message) {
-      if (state === 1) {
-        assert.same(message.body, [{id: 'a'}, {name: 'baz'}]);
-      } else if (state === 2) {
-        assert.same(message.body, [{'@remove': null}, {id: 'a'}, {name: 'baz'}]);
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{id: 'b'}, {name: 'bar'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.get('b'), [{id: 'b'}, {name: 'bar'}]);
+        done();
       }
     };
   });
 
+  it('should insert new synchronized map link values with non-string keys', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 9}, {name: 'nine'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 9}, {name: 'nine'}]]);
+      downlink.set(4, [{id: 4}, {name: 'four'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{id: 4}, {name: 'four'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.get(4), [{id: 4}, {name: 'four'}]);
+        done();
+      }
+    };
+  });
+
+  it('should update existing synchronized map link values', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      downlink.set('a', [{id: 'a'}, {name: 'baz'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{id: 'a'}, {name: 'baz'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.get('a'), [{id: 'a'}, {name: 'baz'}]);
+        done();
+      }
+    };
+  });
+
+  it('should update existing synchronized map link values with non-string keys', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 9}, {name: 'nine'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 4}, {name: 'for'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 9}, {name: 'nine'}], [{id: 4}, {name: 'for'}]]);
+      downlink.set(4, [{id: 4}, {name: 'four'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{id: 4}, {name: 'four'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.get(4), [{id: 4}, {name: 'four'}]);
+        done();
+      }
+    };
+  });
+
+  it('should remove synchronized map link values', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane,
+          [{'@remove': null}, {id: 'a'}, {name: 'foo'}]));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      downlink.delete('a');
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@remove': null}, {id: 'a'}, {name: 'foo'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert(!downlink.has('a'));
+        assert.same(downlink.get('a'), undefined);
+        downlink.forEach(function (value) {
+          assert.same(value, [{id: 'b'}, {name: 'bar'}]);
+        });
+        assert(!downlink.delete('a'));
+        done();
+      }
+    };
+  });
+
+  it('should remove synchronized map link values with non-string keys', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 4}, {name: 'four'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 9}, {name: 'nine'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane,
+          [{'@remove': null}, {id: 9}, {name: 'nine'}]));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 4}, {name: 'four'}], [{id: 9}, {name: 'nine'}]]);
+      downlink.delete(9);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@remove': null}, {id: 9}, {name: 'nine'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert(!downlink.has(9));
+        assert.same(downlink.get(9), undefined);
+        assert(!downlink.delete(9));
+        done();
+      }
+    };
+  });
+
+  it('should remotely remove synchronized map link values', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{'@remove': null}, {id: 'a'}, {name: 'foo'}]));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert(!downlink.has('a'));
+        assert.same(downlink.get('a'), undefined);
+        assert(!downlink.delete('a'));
+        done();
+      }
+    };
+  });
+
+  it('should clear a synchronized map link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      downlink.clear();
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@clear': null}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(message.body, [{'@clear': null}]);
+        assert.equal(downlink.size, 0);
+        assert.same(downlink.state, []);
+        assert(!downlink.has('a'));
+        assert(!downlink.has('b'));
+        done();
+      }
+    };
+  });
+
+  it('should remotely clear a synchronized map link', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@clear': null}]));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert.same(message.body, [{'@clear': null}]);
+        assert.equal(downlink.size, 0);
+        assert.same(downlink.state, []);
+        assert(!downlink.has('a'));
+        assert(!downlink.has('b'));
+        done();
+      }
+    };
+  });
+});
+
+
+describe('Channel', function () {
+  initSuite(this);
 
   it('should link and unlink multiple lanes', function (done) {
     var linkCount = 0;
     var unlinkCount = 0;
-    socket.receive = function (request) {
+    test.receive = function (request) {
       if (request.isLinkRequest) {
         linkCount += 1;
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        if (linkCount === 4) socket.send(new proto.EventMessage('house/bedroom#light', 'light/on'));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
+        if (linkCount === 4) test.send(new proto.EventMessage('house/bedroom#light', 'light/on'));
       } else if (request.isUnlinkRequest) {
         unlinkCount += 1;
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        test.send(new proto.UnlinkedResponse(request.node, request.lane));
         if (unlinkCount === 3) done();
       }
     };
-    var downlink1 = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
-    var downlink2 = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
-    var downlink3 = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/off');
-    var downlink4 = client.link(resolve(hostUri, 'house/bedroom#light'), 'light/on');
+    var downlink1 = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
+    var downlink2 = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
+    var downlink3 = test.client.link(test.resolve('house/kitchen#light'), 'light/off');
+    var downlink4 = test.client.link(test.resolve('house/bedroom#light'), 'light/on');
     downlink4.onEvent = function (message) {
       downlink4.close();
       downlink2.close();
@@ -1028,16 +1413,16 @@ describe('Swim Client', function () {
   });
 
   it('should receive events from multicast links', function (done) {
-    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var nodeUri = test.resolve('house/kitchen#light');
     var body = recon.parse('@switch { level: 100 }');
     var linkCount = 0;
-    socket.receive = function (request) {
+    test.receive = function (request) {
       linkCount += 1;
       assert(request.isLinkRequest);
       assert.equal(request.node, 'house/kitchen#light');
       assert.equal(request.lane, 'light/on');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      if (linkCount === 2) socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      if (linkCount === 2) test.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
     };
     var eventCount = 0;
     function onEvent(message) {
@@ -1047,20 +1432,20 @@ describe('Swim Client', function () {
       assert.same(message.body, body);
       if (eventCount === 2) done();
     }
-    var downlink1 = client.link(nodeUri, 'light/on');
-    var downlink2 = client.link(nodeUri, 'light/on');
+    var downlink1 = test.client.link(nodeUri, 'light/on');
+    var downlink2 = test.client.link(nodeUri, 'light/on');
     downlink1.onEvent = onEvent;
     downlink2.onEvent = onEvent;
   });
 
   it('should close links that fail to connect', function (done) {
     var connectCount = 0;
-    socket.receive = function (request) {
+    test.receive = function (request) {
       connectCount += 1;
       assert.equal(connectCount, 1);
-      socket.close();
+      test.close();
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     downlink.onClose = function () {
       done();
     };
@@ -1068,16 +1453,16 @@ describe('Swim Client', function () {
 
   it('should retry keepalive links that fail to connect', function (done) {
     var connectCount = 0;
-    socket.receive = function (request) {
+    test.receive = function (request) {
       connectCount += 1;
       if (connectCount <= 2) {
-        socket.close();
+        test.close();
       } else {
         assert(request.isLinkRequest);
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
+        test.send(new proto.LinkedResponse(request.node, request.lane));
       }
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on', {keepAlive: true});
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on', {keepAlive: true});
     var disconnectCount = 0;
     downlink.onLinked = function (response) {
       assert.equal(disconnectCount, 2);
@@ -1091,14 +1476,14 @@ describe('Swim Client', function () {
 
   it('should close links when the connection closes', function (done) {
     var connectCount = 0;
-    socket.receive = function (request) {
+    test.receive = function (request) {
       connectCount += 1;
       assert.equal(connectCount, 1);
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.close();
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.close();
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     var linkCount = 0;
     downlink.onLinked = function (response) {
       linkCount += 1;
@@ -1111,12 +1496,12 @@ describe('Swim Client', function () {
   });
 
   it('should reconnect keepalive links when the connection closes', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.close();
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.close();
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on', {keepAlive: true});
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on', {keepAlive: true});
     var linkCount = 0;
     var disconnectCount = 0;
     downlink.onLinked = function (response) {
@@ -1133,12 +1518,12 @@ describe('Swim Client', function () {
   });
 
   it('should change the keepalive mode of active links', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.close();
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.close();
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     var linkCount = 0;
     var disconnectCount = 0;
     downlink.onLinked = function (response) {
@@ -1165,12 +1550,12 @@ describe('Swim Client', function () {
   });
 
   it('should return the connected state of active links', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
-      socket.close();
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.close();
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     downlink.onLinked = function (response) {
       assert(downlink.connected);
     };
@@ -1181,11 +1566,11 @@ describe('Swim Client', function () {
   });
 
   it('should close unlinked links', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      test.send(new proto.UnlinkedResponse(request.node, request.lane));
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     var unlinkCount = 0;
     downlink.onUnlinked = function () {
       unlinkCount += 1;
@@ -1197,24 +1582,24 @@ describe('Swim Client', function () {
   });
 
   it('should ignore non-text frames', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.sendBytes(new Buffer(0));
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.sendBytes(new Buffer(0));
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     downlink.onLinked = function (response) {
       done();
     };
   });
 
   it('should ignore invalid envelopes', function (done) {
-    socket.receive = function (request) {
+    test.receive = function (request) {
       assert(request.isLinkRequest);
-      socket.sendText('@foo');
-      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      test.sendText('@foo');
+      test.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     downlink.onLinked = function (response) {
       done();
     };
@@ -1222,13 +1607,13 @@ describe('Swim Client', function () {
 
   it('should buffer a limited number of commands', function (done) {
     var receiveCount = 0;
-    socket.receive = function (message) {
+    test.receive = function (message) {
       receiveCount += 1;
       assert(receiveCount <= 1024);
       if (receiveCount === 1024) setTimeout(done, 100);
     };
     for (var i = 0; i < 2048; i += 1) {
-      client.command(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+      test.client.command(test.resolve('house/kitchen#light'), 'light/on');
     }
   });
 });

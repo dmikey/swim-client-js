@@ -24,7 +24,7 @@ Scripts can use the global `swim` client to keep simple things simple.
 
 ```js
 var swim = require('swim-client-js');
-swim.command('ws://swim.example.com/chat/public', 'chat/post', 'Hello, world!');
+var users = swim.syncMap('ws://swim.example.com/chat/public', 'chat/users');
 ```
 
 #### swim.client([options])
@@ -76,11 +76,24 @@ lane, and will continue receiving additional events as they're published.
 - `options.keepAlive`: whether or not to automatically re-establish and
   re-synchronize the link after connection failures.  Defaults to `false`.
 
-#### client.syncMap([hostUri, ]nodeUri, laneUri[, primaryKey][, options])
+#### client.syncMap([hostUri, ]nodeUri, laneUri[, options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a remote
-map lane.  The `primaryKey` function is used to extract keys from messages.
-If not specified, `primaryKey` defaults to the identity function.
+map lane.
+
+- `options.primaryKey`: function that derives keys from message values, or a
+  dot-notation string that specifies the path of the primary key.  Defaults to
+  the identity function.
+- `options.sortyBy`: function with which to sort downlinked map state, or a
+  dot-notation string that specifies the path of a value to sort by.  Defaults
+  to `undefined`, which leaves the downlinked map state unsorted.
+- `options.prio`: the desired priority of events on the link.  A priority is
+  a floating point ranging value between `-1.0` and `1.0`, with `-1.0` being
+  the lowest priority, `1.0` being the highest priority, and `0.0` being the
+  default priority.  Events with higher priority are sent to the client before
+  events with lower priority.
+- `options.keepAlive`: whether or not to automatically re-establish and
+  re-synchronize the link after connection failures.  Defaults to `false`.
 
 #### client.command([hostUri, ]nodeUri, laneUri, body)
 
@@ -128,7 +141,7 @@ Returns a synchronized [Downlink](#downlink) to a lane of a node on the remote
 host to which this scope is bound.  Registers the returned downlink with the
 scope to ensure that the link is cleaned up when the scope closes.
 
-#### host.syncMap(nodeUri, laneUri[, primaryKey][, options])
+#### host.syncMap(nodeUri, laneUri[, options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a map
 lane of a node on the remote host to which this scope is bound.  Registers the
@@ -176,7 +189,7 @@ Returns a synchronized [Downlink](#downlink) to a lane of the remote node to
 which this scope is bound.  Registers the returned downlink with the scope to
 ensure that the link is cleaned up when the scope closes.
 
-#### node.syncMap(laneUri[, primaryKey][, options])
+#### node.syncMap(laneUri[, options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a map
 lane of the remote node to which this scope is bound.  Registers the returned
@@ -223,7 +236,7 @@ Returns a synchronized [Downlink](#downlink) to the remote lane to which this
 scope is bound.  Registers the returned downlink with the scope to ensure that
 the link is cleaned up when the scope closes.
 
-#### node.syncMap([primaryKey][, options])
+#### node.syncMap([options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with the
 remote map lane to which this scope is bound.  Registers the returned downlink
@@ -435,18 +448,21 @@ Returns an array of all values in the downlinked map state.
 
 #### mapDownlink.forEach(callback[, thisArg])
 
-Invokes `callback` for every entry in the downlinked map state.  If provided,
+Invokes `callback` for every value in the downlinked map state.  If provided,
 `thisArg` will be passed to each invocation of `callback` for use as its `this` value.
 
-`callback` is invoked with three arguments:
-- the element value
-- the element key
-- the downlinked map state being traversed
+`callback` is invoked with two arguments:
+- the message value
+- the `mapDownlink` being traversed
 
 #### mapDownlink.primaryKey
 
-Returns the primary key function used to extract keys from messages.
+Returns the primary key function used to derive keys from messages.
+
+#### mapDownlink.sortBy
+
+Returns the function used to sort the downlinked map state.
 
 #### mapDownlink.state
 
-Returns the internal downlinked map state as a RECON record.
+Returns the internal downlinked map state as an array.
