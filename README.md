@@ -19,8 +19,8 @@ var swim = require('swim-client-js');
 
 #### swim
 
-The exported library module is also global `Client` instance.  Scripts can use
-the global `swim` client to keep simple things simple.
+The exported library module is also global [Client](#client) instance.
+Scripts can use the global `swim` client to keep simple things simple.
 
 ```js
 var swim = require('swim-client-js');
@@ -29,7 +29,7 @@ swim.command('ws://swim.example.com/chat/public', 'chat/post', 'Hello, world!');
 
 #### swim.client([options])
 
-Returns a `Client` object, which represents a dedicated connection pool.
+Returns a [Client](#client) object, which represents a dedicated connection pool.
 
 - `options.maxReconnectTimeout`: maximum number of milliseconds to wait between
   reconnect attempts after exponential backoff.  Defaults to 30 seconds.
@@ -45,15 +45,12 @@ var client = swim.client();
 
 ### Client
 
-#### client.link(hostUri, nodeUri, laneUri, options)
-#### client.link(hostUri, nodeUri, laneUri)
-#### client.link(nodeUri, laneUri, options)
-#### client.link(nodeUri, laneUri)
+#### client.link([hostUri, ]nodeUri, laneUri[, options])
 
-Returns a `Downlink` to a lane of a remote node.  If provided, `hostUri`
-specifies the network endpoint to connect to, otherwise `nodeUri` must include
-a network authority component.  The returned `Downlink` will receive events
-as they're published on the linked lane of the remote node.
+Returns a [Downlink](#downlink) to a lane of a remote node.  If provided,
+`hostUri` specifies the network endpoint to connect to, otherwise `nodeUri`
+must include a network authority component.  The returned `Downlink` will
+receive events as they're published on the linked lane of the remote node.
 
 - `options.prio`: the desired priority of events on the link.  A priority is
   a floating point ranging value between `-1.0` and `1.0`, with `-1.0` being
@@ -63,16 +60,13 @@ as they're published on the linked lane of the remote node.
 - `options.keepAlive`: whether or not to automatically re-establish the link
   after connection failures.  Defaults to `false`.
 
-#### client.sync(hostUri, nodeUri, laneUri, options)
-#### client.sync(hostUri, nodeUri, laneUri)
-#### client.sync(nodeUri, laneUri, options)
-#### client.sync(nodeUri, laneUri)
+#### client.sync([hostUri, ]nodeUri, laneUri[, options])
 
-Returns a synchronized `Downlink` to a lane of a remote node.  If provided,
-`hostUri` specifies the network endpoint to connect to, otherwise `nodeUri`
-must include a network authority component.  The returned `Downlink` will
-receive a dump of all events representing the current state of the linked lane,
-and will continue receiving additional events as they're published.
+Returns a synchronized [Downlink](#downlink) to a lane of a remote node.  If
+provided, `hostUri` specifies the network endpoint to connect to, otherwise
+`nodeUri` must include a network authority component.  The returned `Downlink`
+will receive a dump of all events representing the current state of the linked
+lane, and will continue receiving additional events as they're published.
 
 - `options.prio`: the desired priority of events on the link.  A priority is
   a floating point ranging value between `-1.0` and `1.0`, with `-1.0` being
@@ -82,8 +76,13 @@ and will continue receiving additional events as they're published.
 - `options.keepAlive`: whether or not to automatically re-establish and
   re-synchronize the link after connection failures.  Defaults to `false`.
 
-#### client.command(hostUri, nodeUri, laneUri, body)
-#### client.command(nodeUri, laneUri, body)
+#### client.syncMap([hostUri, ]nodeUri, laneUri[, primaryKey][, options])
+
+Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a remote
+map lane.  The `primaryKey` function is used to extract keys from messages.
+If not specified, `primaryKey` defaults to the identity function.
+
+#### client.command([hostUri, ]nodeUri, laneUri, body)
 
 Sends a command to a lane of a remote node.  If provided,`hostUri` specifies
 the network endpoint to connect to, otherwise `nodeUri` must include a network
@@ -92,21 +91,19 @@ serialized as [RECON](https://github.com/swimit/recon-js).
 
 #### client.host(hostUri)
 
-Returns a new `HostScope` object bound to the given `hostUri`.
+Returns a new [HostScope](#hostscope) object bound to the given `hostUri`.
 
-#### client.node(hostUri, nodeUri)
-#### client.node(nodeUri)
+#### client.node([hostUri, ]nodeUri)
 
-Returns a new `NodeScope` object bound to the given `nodeUri`.  If provided,
-`hostUri` specifies the network endpoint to connect to, otherwise `nodeUri`
-must include a network authority component.
+Returns a new [NodeScope](#nodescope) object bound to the given `nodeUri`.  If
+provided, `hostUri` specifies the network endpoint to connect to, otherwise
+`nodeUri` must include a network authority component.
 
-#### client.lane(hostUri, nodeUri, laneUri)
-#### client.lane(nodeUri, laneUri)
+#### client.lane([hostUri, ]nodeUri, laneUri)
 
-Returns a new `LaneScope` object bound to the given `laneUri` of the given
-`nodeUri`.  If provided, `hostUri` specifies the network endpoint to connect
-to, otherwise `nodeUri` must include a network authority component.
+Returns a new [LaneScope](#lanescope) object bound to the given `laneUri` of
+the given `nodeUri`.  If provided, `hostUri` specifies the network endpoint to
+connect to, otherwise `nodeUri` must include a network authority component.
 
 #### client.close()
 
@@ -119,19 +116,24 @@ the client connection pool.
 
 Returns the URI of the remote host to which the scope is bound.
 
-#### host.link(nodeUri, laneUri, options)
-#### host.link(nodeUri, laneUri)
+#### host.link(nodeUri, laneUri[, options])
 
-Returns a `Downlink` to a lane of a node on the remote host to which this
-scope is bound.  Registers the returned downlink with the scope to ensure that
-the link is cleaned up when the scope closes.
+Returns a [Downlink](#downlink) to a lane of a node on the remote host to which
+this scope is bound.  Registers the returned downlink with the scope to ensure
+that the link is cleaned up when the scope closes.
 
-#### host.sync(nodeUri, laneUri, options)
-#### host.sync(nodeUri, laneUri)
+#### host.sync(nodeUri, laneUri[, options])
 
-Returns a synchronized `Downlink` to a lane of a node on the remote host to
-which this scope is bound.  Registers the returned downlink with the scope to
-ensure that the link is cleaned up when the scope closes.
+Returns a synchronized [Downlink](#downlink) to a lane of a node on the remote
+host to which this scope is bound.  Registers the returned downlink with the
+scope to ensure that the link is cleaned up when the scope closes.
+
+#### host.syncMap(nodeUri, laneUri[, primaryKey][, options])
+
+Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a map
+lane of a node on the remote host to which this scope is bound.  Registers the
+returned downlink with the scope to ensure that the link is cleaned up when
+the scope closes.
 
 #### host.command(nodeUri, laneUri, body)
 
@@ -139,13 +141,13 @@ Sends a command to a lane of a node on the remote host to which this scope is bo
 
 #### host.node(nodeUri)
 
-Returns a new `NodeScope` object bound to the given `nodeUri` on the remote
+Returns a new [NodeScope](#nodescope) object bound to the given `nodeUri` on the remote
 `hostUri` to which this scope is bound.
 
 #### host.lane(nodeUri, laneUri)
 
-Returns a new `LaneScope` object bound to the given `laneUri` of the given
-`nodeUri` on the remote `hostUri` to which this scope is bound.
+Returns a new [LaneScope](#lanescope) object bound to the given `laneUri` of
+the given `nodeUri` on the remote `hostUri` to which this scope is bound.
 
 #### host.close()
 
@@ -162,19 +164,24 @@ Returns the URI of the remote host to which the scope is bound.
 Returns the URI of the remote node to which the scope is bound.  Returns an
 absolute URI resolved against the `hostUri`.
 
-#### node.link(laneUri, options)
-#### node.link(laneUri)
+#### node.link(laneUri[, options])
 
-Returns a `Downlink` to a lane of the remote node to which this scope is bound.
-Registers the returned downlink with the scope to ensure that the link is
-cleaned up when the scope closes.
-
-#### node.sync(laneUri, options)
-#### node.sync(laneUri)
-
-Returns a synchronized `Downlink` to a lane of the remote node to which this
+Returns a [Downlink](#downlink) to a lane of the remote node to which this
 scope is bound.  Registers the returned downlink with the scope to ensure that
 the link is cleaned up when the scope closes.
+
+#### node.sync(laneUri[, options])
+
+Returns a synchronized [Downlink](#downlink) to a lane of the remote node to
+which this scope is bound.  Registers the returned downlink with the scope to
+ensure that the link is cleaned up when the scope closes.
+
+#### node.syncMap(laneUri[, primaryKey][, options])
+
+Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a map
+lane of the remote node to which this scope is bound.  Registers the returned
+downlink with the scope to ensure that the link is cleaned up when the scope
+closes.
 
 #### node.command(laneUri, body)
 
@@ -182,8 +189,8 @@ Sends a command to a lane of the remote node to which this scope is bound.
 
 #### node.lane(laneUri)
 
-Returns a new `LaneScope` object bound to the given `laneUri` of the `nodeUri`
-and the `hostUri` to which this scope is bound.
+Returns a new [LaneScope](#lanescope) object bound to the given `laneUri` of
+the `nodeUri` and the `hostUri` to which this scope is bound.
 
 #### node.close()
 
@@ -204,19 +211,23 @@ absolute URI resolved against the `hostUri`.
 
 Returns the URI of the lane to which the scope is bound.
 
-#### lane.link(options)
-#### lane.link()
+#### lane.link([options])
 
-Returns a `Downlink` to the remote lane to which this scope is bound.
-Registers the returned downlink with the scope to ensure that the link is
-cleaned up when the scope closes.
-
-#### lane.sync(laneUri, options)
-#### lane.sync(laneUri)
-
-Returns a synchronized `Downlink` to the remote lane to which this scope is
+Returns a [Downlink](#downlink) to the remote lane to which this scope is
 bound.  Registers the returned downlink with the scope to ensure that the link
 is cleaned up when the scope closes.
+
+#### lane.sync([options])
+
+Returns a synchronized [Downlink](#downlink) to the remote lane to which this
+scope is bound.  Registers the returned downlink with the scope to ensure that
+the link is cleaned up when the scope closes.
+
+#### node.syncMap([primaryKey][, options])
+
+Returns a [MapDownlink](#mapdownlink) that synchronizes its state with the
+remote map lane to which this scope is bound.  Registers the returned downlink
+with the scope to ensure that the link is cleaned up when the scope closes.
 
 #### lane.command(body)
 
@@ -372,3 +383,70 @@ The `onClose` callback gets invoked when the downlink has been disconnected and
 will not be reconnected.  This happens when the client calls `downlink.close()`,
 or when the link is explicityly `@unlinked` by the remote host, or when the
 network connection that carries a non-`keepAlive` link gets disconnected.
+
+### MapDownlink
+
+A `MapDownlink` synchronizes its state with a remote `MapLane`.  A `MapDownlink`
+supports the full functionality of an ordinary [Downlink](#downlink).  It also
+implements the behavior of a JavaScript key-value `Map`.  All map operations
+are transparently synchronized with the remote lane.  And all commands on the
+remote lane are transparently syncrhonized with the `MapDownlink` map.
+`MapDownlink` seamlessly supports complex key objects.
+
+Note that the complete state of the map is not guaranteed to be available until
+the `onSynced` callback has been invoked.  And the downlinked map state may
+desync when the link's underlying network connection disconnects.
+
+#### mapDownlink.size
+
+Returns the number of entries in the downlinked map state.
+
+#### mapDownlink.has(key)
+
+Returns `true` if the downlinked map state contains a given `key`.
+
+#### mapDownlink.get(key)
+
+Returns the value associated with a given `key` in the downlinked map state.
+
+#### mapDownlink.set(key, value)
+
+Associates a `value` with a given `key` in the downlinked map state.  Pushes
+the change to the remote lane.  Returns `this`.
+
+#### mapDownlink.delete(key)
+
+Removes an entry with `key` from the downlinked map state, pushing any change
+to the remote map lane.  Returns `true` if an entry was removed, otherwise
+returns `false`.
+
+#### mapDownlink.clear()
+
+Removes all entries from the downlinked map state and the remote map lane.
+Returns `this`.
+
+#### mapDownlink.keys()
+
+Returns an array of all keys in the downlinked map state.
+
+#### mapDownlink.values()
+
+Returns an array of all values in the downlinked map state.
+
+#### mapDownlink.forEach(callback[, thisArg])
+
+Invokes `callback` for every entry in the downlinked map state.  If provided,
+`thisArg` will be passed to each invocation of `callback` for use as its `this` value.
+
+`callback` is invoked with three arguments:
+- the element value
+- the element key
+- the downlinked map state being traversed
+
+#### mapDownlink.primaryKey
+
+Returns the primary key function used to extract keys from messages.
+
+#### mapDownlink.state
+
+Returns the internal downlinked map state as a RECON record.

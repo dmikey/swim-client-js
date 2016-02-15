@@ -13,7 +13,7 @@ var swim = require('./swim-client.js');
 
 assert.same = function (x, y) {
   if (!recon.equal(x, y)) {
-    assert.fail(false, true, recon.stringify(x) + ' did not equal ' + recon.stringify(y));
+    assert.fail(x, y, recon.stringify(x) + ' did not equal ' + recon.stringify(y));
   }
 };
 
@@ -909,6 +909,95 @@ describe('Swim Client', function () {
     var downlink2 = lane.link();
     downlink2.onLink = onLink;
     downlink2.onClose = onClose;
+  });
+
+
+  it('should create a synchronized map link through a client scope', function () {
+    var downlink = client.syncMap(hostUri, 'chat/public', 'chat/users');
+    assert.same(downlink.size, 0);
+    assert.same(downlink.state, []);
+    downlink = client.syncMap(resolve(hostUri, 'chat/public'), 'chat/users');
+    assert.same(downlink.size, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should create a synchronized map link through a host scope', function () {
+    var host = client.host(hostUri);
+    var downlink = host.syncMap('chat/public', 'chat/users');
+    assert.same(downlink.size, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should create a synchronized map link through a node scope', function () {
+    var node = client.node(hostUri, 'chat/public');
+    var downlink = node.syncMap('chat/users');
+    assert.same(downlink.size, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should create a synchronized map link through a lane scope', function () {
+    var lane = client.lane(hostUri, 'chat/public', 'chat/users');
+    var downlink = lane.syncMap();
+    assert.same(downlink.size, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should sync a map lane', function (done) {
+    var commandCount = 0;
+    socket.receive = function (message) {
+      if (message.isSyncRequest) {
+        socket.send(new proto.LinkedResponse(message.node, message.lane));
+        socket.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
+        socket.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        socket.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        commandCount += 1;
+        if (commandCount === 1) {
+          socket.send(new proto.EventMessage(message.node, message.lane, message.body));
+        } else if (commandCount === 2) {
+          socket.send(new proto.EventMessage(message.node, message.lane,
+            [{'@remove': null}, {id: 'a'}, {name: 'baz'}]));
+        }
+      }
+    };
+    function primaryKey(user) { return user.id; }
+    var downlink = client.syncMap(hostUri, 'chat/public', 'chat/users', primaryKey);
+    var state = 0;
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        state = 2;
+        assert.same(downlink.get('a'), [{id: 'a'}, {name: 'baz'}]);
+        downlink.delete('a');
+      } else if (state === 2) {
+        assert(!downlink.has('a'));
+        assert.same(downlink.get('a'), undefined);
+        downlink.forEach(function (value, key) {
+          assert.same(value, [{id: 'b'}, {name: 'bar'}]);
+          assert.same(key, 'b');
+        });
+        done();
+      }
+    };
+    downlink.onSynced = function (response) {
+      state = 1;
+      assert.same(downlink.size, 2);
+      assert(downlink.has('a'));
+      assert(downlink.has('b'));
+      assert(!downlink.has('c'));
+      assert.same(downlink.get('a'), [{id: 'a'}, {name: 'foo'}]);
+      assert.same(downlink.get('b'), [{id: 'b'}, {name: 'bar'}]);
+      assert.same(downlink.get('c'), undefined);
+      assert.same(downlink.keys(), ['a', 'b']);
+      assert.same(downlink.values(), [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      downlink.set('a', [{id: 'a'}, {name: 'baz'}]);
+    };
+    downlink.onCommand = function (message) {
+      if (state === 1) {
+        assert.same(message.body, [{id: 'a'}, {name: 'baz'}]);
+      } else if (state === 2) {
+        assert.same(message.body, [{'@remove': null}, {id: 'a'}, {name: 'baz'}]);
+      }
+    };
   });
 
 

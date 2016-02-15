@@ -75,6 +75,26 @@ Client.prototype.sync = function () {
   var channel = this.getOrCreateChannel(hostUri);
   return channel.sync(nodeUri, laneUri, options);
 };
+Client.prototype.syncMap = function () {
+  var hostUri, nodeUri, args, i, n;
+  if (arguments.length >= 3 && typeof arguments[2] === 'string') {
+    hostUri = arguments[0];
+    nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+    args = [nodeUri];
+    for (i = 2, n = arguments.length; i < n; i += 1) {
+      args.push(arguments[i]);
+    }
+  } else {
+    nodeUri = arguments[0];
+    hostUri = Client.extractHostUri(nodeUri);
+    args = [nodeUri];
+    for (i = 1, n = arguments.length; i < n; i += 1) {
+      args.push(arguments[i]);
+    }
+  }
+  var channel = this.getOrCreateChannel(hostUri);
+  return channel.syncMap.apply(channel, args);
+};
 Client.prototype.command = function () {
   var hostUri, nodeUri, laneUri, body;
   if (arguments.length === 3) {
@@ -194,6 +214,12 @@ HostScope.prototype.sync = function (nodeUri, laneUri, options) {
   this.registerDownlink(downlink);
   return downlink;
 };
+HostScope.prototype.syncMap = function () {
+  arguments[0] = Client.resolveNodeUri(this.hostUri, arguments[0]);
+  var downlink = this.channel.syncMap.apply(this.channel, arguments);
+  this.registerDownlink(downlink);
+  return downlink;
+};
 HostScope.prototype.command = function (nodeUri, laneUri, body) {
   this.channel.command(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, body);
 };
@@ -224,6 +250,13 @@ NodeScope.prototype.sync = function (laneUri, options) {
   this.registerDownlink(downlink);
   return downlink;
 };
+NodeScope.prototype.syncMap = function () {
+  var args = [this.nodeUri];
+  Array.prototype.push.apply(args, arguments);
+  var downlink = this.channel.syncMap.apply(this.channel, args);
+  this.registerDownlink(downlink);
+  return downlink;
+};
 NodeScope.prototype.command = function (laneUri, body) {
   this.channel.command(this.nodeUri, laneUri, body);
 };
@@ -249,6 +282,13 @@ LaneScope.prototype.link = function (options) {
 };
 LaneScope.prototype.sync = function (options) {
   var downlink = this.channel.sync(this.nodeUri, this.laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+LaneScope.prototype.syncMap = function () {
+  var args = [this.nodeUri, this.laneUri];
+  Array.prototype.push.apply(args, arguments);
+  var downlink = this.channel.syncMap.apply(this.channel, args);
   this.registerDownlink(downlink);
   return downlink;
 };
@@ -301,6 +341,23 @@ Channel.prototype.link = function (nodeUri, laneUri, options) {
 };
 Channel.prototype.sync = function (nodeUri, laneUri, options) {
   var downlink = new ChannelSyncedDownlink(this, this.hostUri, nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+Channel.prototype.syncMap = function () {
+  var nodeUri = arguments[0];
+  var laneUri = arguments[1];
+  var options, primaryKey;
+  for (var i = 2, n = arguments.length; i < n; i += 1) {
+    var arg = arguments[i];
+    if (typeof arg === 'function') {
+      primaryKey = arg;
+    } else if (typeof arg === 'object') {
+      options = arg;
+    }
+  }
+  primaryKey = primaryKey || function (body) { return body; };
+  var downlink = new ChannelMapDownlink(this, this.hostUri, nodeUri, laneUri, options, primaryKey);
   this.registerDownlink(downlink);
   return downlink;
 };
@@ -635,6 +692,14 @@ Object.defineProperty(ChannelDownlink.prototype, 'onEventMessage', {
   },
   configurable: true
 });
+Object.defineProperty(ChannelDownlink.prototype, 'onCommandMessage', {
+  value: function (message) {
+    if (typeof this.delegate.onCommand === 'function') {
+      this.delegate.onCommand(message);
+    }
+  },
+  configurable: true
+});
 Object.defineProperty(ChannelDownlink.prototype, 'onLinkRequest', {
   value: function (request) {
     if (typeof this.delegate.onLink === 'function') {
@@ -755,6 +820,87 @@ Object.defineProperty(ChannelSyncedDownlink.prototype, 'onChannelConnect', {
   },
   configurable: true
 });
+
+
+function ChannelMapDownlink(channel, hostUri, nodeUri, laneUri, options, primaryKey) {
+  ChannelSyncedDownlink.call(this, channel, hostUri, nodeUri, laneUri, options);
+  this.primaryKey = primaryKey;
+  this.state = [];
+}
+ChannelMapDownlink.prototype = Object.create(ChannelSyncedDownlink.prototype);
+ChannelMapDownlink.prototype.constructor = ChannelMapDownlink;
+Object.defineProperty(ChannelMapDownlink.prototype, 'onEventMessage', {
+  value: function (message) {
+    var key;
+    var tag = recon.tag(message.body);
+    if (tag === '@remove') {
+      var body = recon.tail(message.body);
+      key = this.primaryKey(body);
+      if (key !== undefined) {
+        recon.remove(this.state, key);
+      }
+    } else {
+      key = this.primaryKey(message.body);
+      if (key !== undefined) {
+        recon.set(this.state, key, message.body);
+      }
+    }
+    ChannelSyncedDownlink.prototype.onEventMessage.call(this, message);
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelMapDownlink.prototype, 'size', {
+  get: function () {
+    return recon.size(this.state);
+  },
+  configurable: true,
+  enumerable: true
+});
+ChannelMapDownlink.prototype.has = function (key) {
+  return recon.has(this.state, key);
+};
+ChannelMapDownlink.prototype.get = function (key) {
+  return recon.get(this.state, key);
+};
+ChannelMapDownlink.prototype.set = function (key, value) {
+  recon.set(this.state, key, value);
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  var message = new proto.CommandMessage(nodeUri, this.laneUri, value);
+  this.onCommandMessage(message);
+  this.channel.push(message);
+  return this;
+};
+ChannelMapDownlink.prototype.delete = function (key) {
+  var value = recon.get(this.state, key);
+  if (value !== undefined) {
+    recon.remove(this.state, key);
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var body = recon.concat({'@remove': null}, value);
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+    return true;
+  } else {
+    return false;
+  }
+};
+ChannelMapDownlink.prototype.clear = function () {
+  this.state = [];
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  var message = new proto.CommandMessage(nodeUri, this.laneUri, {'@clear': null});
+  this.onCommandMessage(message);
+  this.channel.push(message);
+  return this;
+};
+ChannelMapDownlink.prototype.keys = function () {
+  return recon.keys(this.state);
+};
+ChannelMapDownlink.prototype.values = function () {
+  return recon.values(this.state);
+};
+ChannelMapDownlink.prototype.forEach = function (callback, thisArg) {
+  return recon.forEach(this.state, callback, thisArg);
+};
 
 
 function UriCache(baseUri, size) {
