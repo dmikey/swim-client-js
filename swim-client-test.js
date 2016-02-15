@@ -22,12 +22,12 @@ function resolve(base, relative) {
 }
 
 
-describe('SWIM client', function () {
+describe('Swim Client', function () {
   this.timeout(5000);
   this.slow(5000);
 
-  var httpServer, wsServer, connection, socket;
-  var endpoint = 'http://localhost:8009';
+  var httpServer, wsServer, connection, socket, client;
+  var hostUri = 'http://localhost:8009';
 
   beforeEach(function (done) {
     httpServer = http.createServer();
@@ -38,6 +38,7 @@ describe('SWIM client', function () {
       httpServer: httpServer
     });
     socket = {};
+    client = swim.client();
     wsServer.on('request', function (request) {
       var connection = request.accept(request.origin);
       connection.on('message', function (frame) {
@@ -62,381 +63,1083 @@ describe('SWIM client', function () {
   });
 
   afterEach(function (done) {
+    if (client) client.close();
     if (connection) connection.close();
     wsServer.shutDown();
     httpServer.close(function () {
+      client = undefined;
       socket = undefined;
       connection = undefined;
       wsServer = undefined;
       httpServer = undefined;
-      swim.reset();
       done();
     });
   });
 
-  it('should link node lanes', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
+
+  it('should create a link through a client scope', function () {
+    var options = {prio: 0.5};
+    var downlink = client.link(hostUri, 'house/kitchen#light', 'light/on', options);
+    assert.equal(downlink.hostUri, hostUri);
+    assert.equal(downlink.nodeUri, resolve(hostUri, 'house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(!downlink.keepAlive);
+    assert.equal(downlink.options, options);
+    assert.equal(downlink.delegate, downlink);
+  });
+
+  it('should create a synchronized link through a client scope', function () {
+    var options = {prio: 0.5};
+    var downlink = client.sync(hostUri, 'house/kitchen#light', 'light/on', options);
+    assert.equal(downlink.hostUri, hostUri);
+    assert.equal(downlink.nodeUri, resolve(hostUri, 'house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(!downlink.keepAlive);
+    assert.equal(downlink.options, options);
+    assert.equal(downlink.delegate, downlink);
+
+    downlink = client.sync(resolve(hostUri, 'house/kitchen#light'), 'light/on', options);
+    assert.equal(downlink.hostUri, hostUri);
+    assert.equal(downlink.nodeUri, resolve(hostUri, 'house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(!downlink.keepAlive);
+    assert.equal(downlink.options, options);
+    assert.equal(downlink.delegate, downlink);
+  });
+
+  it('should link a lane through a client scope', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
     socket.receive = function (request) {
-      if (request.isLinkRequest && request.node === 'house/kitchen#light' && request.lane === 'light/on') {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var downlink = client.link(nodeUri, 'light/on');
+    var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should receive an event from a link through a client scope', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var body = recon.parse('@switch { level: 100 }');
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+    };
+    var downlink = client.link(nodeUri, 'light/on');
+    downlink.onEvent = function (message) {
+      assert.equal(message.node, nodeUri);
+      assert.equal(message.lane, 'light/on');
+      assert.same(message.body, body);
+      done();
+    };
+  });
+
+  it('should sync a lane through a client scope', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var body = recon.parse('@switch { level: 100 }');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = client.sync(nodeUri, 'light/on');
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a lane through a client scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
         socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', undefined, record));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
       }
     };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', function (response) {
-      assert.equal(response.node, 'house/kitchen#light');
-      assert.equal(response.lane, 'light/on');
-      assert.same(response.body, record);
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
       done();
-    });
+    };
   });
 
-  it('should unlink node lanes', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
+  it('should command a lane through a client scope', function (done) {
+    var body = recon.parse('@switch { level: 0 }');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'house');
+      assert.equal(message.lane, 'light/off');
+      assert.same(message.body, body);
+      done();
+    };
+    client.command(resolve(hostUri, 'house'), 'light/off', body);
+  });
+
+  it('should link a meta lane through a client scope', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var downlink = client.link(hostUri, 'swim:meta:router', 'gateway/info');
     var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      done();
+    };
+  });
+
+  it('should receive an event from a meta link through a client scope', function (done) {
+    var body = recon.parse('@gateway');
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+    };
+    var downlink = client.link(hostUri, 'swim:meta:router', 'gateway/info');
+    downlink.onEvent = function (message) {
+      assert.equal(message.node, 'swim:meta:router');
+      assert.equal(message.lane, 'gateway/info');
+      assert.same(message.body, body);
+      done();
+    };
+  });
+
+  it('should sync a meta lane through a client scope', function (done) {
+    var body = recon.parse('@gateway');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = client.sync(hostUri, 'swim:meta:router', 'gateway/info');
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a meta lane through a client scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      }
+    };
+    var downlink = client.link(hostUri, 'swim:meta:router', 'gateway/info');
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      done();
+    };
+  });
+
+  it('should command a meta lane through a client scope', function (done) {
+    var body = recon.parse('@gateway');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'swim:meta:router');
+      assert.equal(message.lane, 'gateway/info');
+      assert.same(message.body, body);
+      done();
+    };
+    client.command(hostUri, 'swim:meta:router', 'gateway/info', body);
+  });
+
+
+  it('should create a host scope from a client scope', function () {
+    var host = client.host(hostUri);
+    assert.equal(host.hostUri, hostUri);
+  });
+
+  it('should link a lane through a host scope', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var host = client.host(hostUri);
+    var downlink = host.link('house/kitchen#light', 'light/on');
+    var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, resolve(hostUri, 'house/kitchen#light'));
+      assert.equal(response.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should sync a lane through a host scope', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var body = recon.parse('@switch { level: 100 }');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var host = client.host(hostUri);
+    var downlink = host.sync('house/kitchen#light', 'light/on');
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a lane through a host scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      }
+    };
+    var host = client.host(hostUri);
+    var downlink = host.link('house/kitchen#light', 'light/on');
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should command a lane through a host scope', function (done) {
+    var body = recon.parse('@switch { level: 0 }');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'house');
+      assert.equal(message.lane, 'light/off');
+      assert.same(message.body, body);
+      done();
+    };
+    var host = client.host(hostUri);
+    host.command('house', 'light/off', body);
+  });
+
+  it('should link a meta lane through a host scope', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var host = client.host(hostUri);
+    var downlink = host.link('swim:meta:router', 'gateway/info');
+    var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      done();
+    };
+  });
+
+  it('should sync a meta lane through a host scope', function (done) {
+    var nodeUri = resolve(hostUri, 'swim:meta:router');
+    var body = recon.parse('@gateway');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var host = client.host(hostUri);
+    var downlink = host.sync('swim:meta:router', 'gateway/info');
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'gateway/info');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'gateway/info');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a meta lane through a host scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      }
+    };
+    var host = client.host(hostUri);
+    var downlink = host.link('swim:meta:router', 'gateway/info');
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      done();
+    };
+  });
+
+  it('should command a meta lane through a host scope', function (done) {
+    var body = recon.parse('@gateway');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'swim:meta:router');
+      assert.equal(message.lane, 'gateway/info');
+      assert.same(message.body, body);
+      done();
+    };
+    var host = client.host(hostUri);
+    host.command('swim:meta:router', 'gateway/info', body);
+  });
+
+  it('should close all member links when a host scope closes', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var host = client.host(hostUri);
+    var linkCount = 0;
+    var closeCount = 0;
+    function onLink(request) {
+      linkCount += 1;
+      if (linkCount === 2) host.close();
+    }
+    function onClose() {
+      closeCount += 1;
+      if (closeCount === 2) done();
+    }
+    var downlink1 = host.link('house/kitchen#light', 'light/on');
+    downlink1.onLink = onLink;
+    downlink1.onClose = onClose;
+    var downlink2 = host.link('swim:meta:router', 'gateway/info');
+    downlink2.onLink = onLink;
+    downlink2.onClose = onClose;
+  });
+
+
+  it('should create a node scope from a client scope', function () {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var node1 = client.node(hostUri, 'house/kitchen#light');
+    var node2 = client.node(nodeUri);
+    assert.equal(node1.hostUri, hostUri);
+    assert.equal(node1.nodeUri, nodeUri);
+    assert.equal(node2.hostUri, hostUri);
+    assert.equal(node2.nodeUri, nodeUri);
+  });
+
+  it('should create a node scope from a host scope', function () {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var host = client.host(hostUri);
+    var node = host.node('house/kitchen#light');
+    assert.equal(node.hostUri, hostUri);
+    assert.equal(node.nodeUri, nodeUri);
+  });
+
+  it('should rewrite swim URI schemes in host URIs extracted from node URIs', function () {
+    var node1 = client.node('swim://example.com/');
+    assert.equal(node1.hostUri, 'ws://example.com');
+    var node2 = client.node('swims://example.com/');
+    assert.equal(node2.hostUri, 'wss://example.com');
+  });
+
+  it('should link a lane through a node scope', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var node = client.node(hostUri, 'house/kitchen#light');
+    var downlink = node.link('light/on');
+    var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, resolve(hostUri, 'house/kitchen#light'));
+      assert.equal(response.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should sync a lane through a node scope', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var body = recon.parse('@switch { level: 100 }');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var node = client.node(hostUri, 'house/kitchen#light');
+    var downlink = node.sync('light/on');
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a lane through a node scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      }
+    };
+    var node = client.node(hostUri, 'house/kitchen#light');
+    var downlink = node.link('light/on');
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should command a lane through a node scope', function (done) {
+    var body = recon.parse('@switch { level: 0 }');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'house');
+      assert.equal(message.lane, 'light/off');
+      assert.same(message.body, body);
+      done();
+    };
+    var node = client.node(hostUri, 'house');
+    node.command('light/off', body);
+  });
+
+  it('should link a lane through a meta node scope', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var node = client.node(hostUri, 'swim:meta:router');
+    var downlink = node.link('gateway/info');
+    var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, 'swim:meta:router');
+      assert.equal(response.lane, 'gateway/info');
+      done();
+    };
+  });
+
+  it('should sync a lane through a meta node scope', function (done) {
+    var nodeUri = resolve(hostUri, 'swim:meta:router');
+    var body = recon.parse('@gateway');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var node = client.node(hostUri, 'swim:meta:router');
+    var downlink = node.sync('gateway/info');
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'gateway/info');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'gateway/info');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a lane through a meta node scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      }
+    };
+    var node = client.node(hostUri, 'swim:meta:router');
+    var downlink = node.link('gateway/info');
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'swim:meta:router');
+      assert.equal(request.lane, 'gateway/info');
+      done();
+    };
+  });
+
+  it('should command a lane through a meta node scope', function (done) {
+    var body = recon.parse('@gateway');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'swim:meta:router');
+      assert.equal(message.lane, 'gateway/info');
+      assert.same(message.body, body);
+      done();
+    };
+    var node = client.node(hostUri, 'swim:meta:router');
+    node.command('gateway/info', body);
+  });
+
+  it('should close all member links when a node scope closes', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var node = client.node(hostUri, 'house/kitchen#light');
+    var linkCount = 0;
+    var closeCount = 0;
+    function onLink(request) {
+      linkCount += 1;
+      if (linkCount === 2) node.close();
+    }
+    function onClose() {
+      closeCount += 1;
+      if (closeCount === 2) done();
+    }
+    var downlink1 = node.link('light/on');
+    downlink1.onLink = onLink;
+    downlink1.onClose = onClose;
+    var downlink2 = node.link('lgith/off');
+    downlink2.onLink = onLink;
+    downlink2.onClose = onClose;
+  });
+
+
+  it('should create a lane scope from a client scope', function () {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var lane1 = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var lane2 = client.lane(nodeUri, 'light/on');
+    assert.equal(lane1.hostUri, hostUri);
+    assert.equal(lane1.nodeUri, nodeUri);
+    assert.equal(lane1.laneUri, 'light/on');
+    assert.equal(lane2.hostUri, hostUri);
+    assert.equal(lane2.nodeUri, nodeUri);
+    assert.equal(lane2.laneUri, 'light/on');
+  });
+
+  it('should create a lane scope from a host scope', function () {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var host = client.host(hostUri);
+    var lane = host.lane('house/kitchen#light', 'light/on');
+    assert.equal(lane.hostUri, hostUri);
+    assert.equal(lane.nodeUri, nodeUri);
+    assert.equal(lane.laneUri, 'light/on');
+  });
+
+  it('should create a lane scope from a node scope', function () {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var node = client.node(nodeUri);
+    var lane = node.lane('light/on');
+    assert.equal(lane.hostUri, hostUri);
+    assert.equal(lane.nodeUri, nodeUri);
+    assert.equal(lane.laneUri, 'light/on');
+  });
+
+  it('should link a lane through a lane scope', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var downlink = lane.link();
+    var linkCount = 0;
+    downlink.onLink = function (request) {
+      linkCount += 1;
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+    };
+    downlink.onLinked = function (response) {
+      assert.equal(linkCount, 1);
+      assert.equal(response.node, resolve(hostUri, 'house/kitchen#light'));
+      assert.equal(response.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should sync a lane through a lane scope', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var body = recon.parse('@switch { level: 100 }');
+    socket.receive = function (request) {
+      assert(request.isSyncRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+      socket.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var downlink = lane.sync();
+    var state = 0;
+    downlink.onSync = function (request) {
+      assert.equal(state, 0);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      state = 1;
+    };
+    downlink.onEvent = function (response) {
+      assert.equal(state, 1);
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.same(response.body, body);
+      state = 2;
+    };
+    downlink.onSynced = function (response) {
+      assert.equal(response.node, nodeUri);
+      assert.equal(response.lane, 'light/on');
+      assert.equal(state, 2);
+      done();
+    };
+  });
+
+  it('should unlink a lane through a lane scope', function (done) {
+    socket.receive = function (request) {
+      if (request.isLinkRequest) {
+        socket.send(new proto.LinkedResponse(request.node, request.lane));
+      } else if (request.isUnlinkRequest) {
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+      }
+    };
+    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var downlink = lane.link();
+    downlink.onLinked = function (response) {
+      downlink.close();
+    };
+    downlink.onUnlink = function (request) {
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      done();
+    };
+  });
+
+  it('should command a lane through a lane scope', function (done) {
+    var body = recon.parse('@switch { level: 0 }');
+    socket.receive = function (message) {
+      assert(message.isCommandMessage);
+      assert.equal(message.node, 'house');
+      assert.equal(message.lane, 'light/off');
+      assert.same(message.body, body);
+      done();
+    };
+    var lane = client.lane(hostUri, 'house', 'light/off');
+    lane.command(body);
+  });
+
+  it('should close all member links when a lane scope closes', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+    };
+    var lane = client.lane(hostUri, 'house/kitchen#light', 'light/on');
+    var linkCount = 0;
+    var closeCount = 0;
+    function onLink(request) {
+      linkCount += 1;
+      if (linkCount === 2) lane.close();
+    }
+    function onClose() {
+      closeCount += 1;
+      if (closeCount === 2) done();
+    }
+    var downlink1 = lane.link();
+    downlink1.onLink = onLink;
+    downlink1.onClose = onClose;
+    var downlink2 = lane.link();
+    downlink2.onLink = onLink;
+    downlink2.onClose = onClose;
+  });
+
+
+  it('should link and unlink multiple lanes', function (done) {
+    var linkCount = 0;
+    var unlinkCount = 0;
     socket.receive = function (request) {
       if (request.isLinkRequest) {
         linkCount += 1;
         socket.send(new proto.LinkedResponse(request.node, request.lane));
-        if (linkCount === 2) socket.send(new proto.EventMessage('house/bedroom#light', 'light/on', undefined, record));
-      }
-      else if (request.isUnlinkRequest) {
-        linkCount -= 1;
-        if (linkCount === 0) done();
+        if (linkCount === 4) socket.send(new proto.EventMessage('house/bedroom#light', 'light/on'));
+      } else if (request.isUnlinkRequest) {
+        unlinkCount += 1;
+        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+        if (unlinkCount === 3) done();
       }
     };
-    var handle1 = {};
-    var handle2 = {};
-    var handle3 = {};
-    function handle4() {
-      swim.unlink(resolve(endpoint, 'house/bedroom#light'), 'light/on', handle4);
-      swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle2);
-      swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/off', handle3);
-      swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/on', function () {}); // Ignored
-      swim.unlink(resolve(endpoint, 'house/kitchen'), 'light/off', handle1); // Ignored
-      swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/off', handle1); // Ignored
-      swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle1);
-    }
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle1);
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle2);
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/off', handle3);
-    swim.link(resolve(endpoint, 'house/bedroom#light'), 'light/on', handle4);
+    var downlink1 = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink2 = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var downlink3 = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/off');
+    var downlink4 = client.link(resolve(hostUri, 'house/bedroom#light'), 'light/on');
+    downlink4.onEvent = function (message) {
+      downlink4.close();
+      downlink2.close();
+      downlink3.close();
+      downlink1.close();
+    };
   });
 
-  it('should sync node lanes', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
-      if (request.isSyncRequest && request.node === 'house/kitchen#light' && request.lane === 'light/on') {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', undefined, record));
-        socket.send(new proto.SyncedResponse(request.node, request.lane));
-      }
-    };
-    var linked = false;
-    var received = false;
-    function onLinked() {
-      linked = true;
-    }
-    function onEvent(response) {
-      received = true;
-      assert.equal(response.node, 'house/kitchen#light');
-      assert.equal(response.lane, 'light/on');
-      assert.same(response.body, record);
-    }
-    function onSynced() {
-      assert(linked);
-      assert(received);
-      done();
-    }
-    var handle = {
-      onLinked: onLinked,
-      onEvent: onEvent,
-      onSynced: onSynced
-    };
-    swim.sync(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-  });
-
-  it('should proxy link node lanes', function (done) {
-    var record = recon.parse('@gateway');
-    socket.receive = function (request) {
-      if (request.isLinkRequest && request.node === 'swim:meta:router' && request.lane === 'gateway/info') {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', undefined, record));
-      }
-    };
-    swim.proxyLink(endpoint, 'swim:meta:router', 'gateway/info', function (response) {
-      assert.equal(response.node, 'swim:meta:router');
-      assert.equal(response.lane, 'gateway/info');
-      assert.same(response.body, record);
-      done();
-    });
-  });
-
-  it('should proxy sync node lanes', function (done) {
-    var record = recon.parse('@gateway');
-    socket.receive = function (request) {
-      if (request.isSyncRequest && request.node === 'swim:meta:router' && request.lane === 'gateway/info') {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.EventMessage('swim:meta:router', 'gateway/info', undefined, record));
-        socket.send(new proto.SyncedResponse(request.node, request.lane));
-      }
-    };
-    var linked = false;
-    var received = false;
-    function onLinked() {
-      linked = true;
-    }
-    function onEvent(response) {
-      received = true;
-      assert.equal(response.node, 'swim:meta:router');
-      assert.equal(response.lane, 'gateway/info');
-      assert.same(response.body, record);
-    }
-    function onSynced() {
-      assert(linked);
-      assert(received);
-      done();
-    }
-    var handle = {
-      onLinked: onLinked,
-      onEvent: onEvent,
-      onSynced: onSynced
-    };
-    swim.proxySync(endpoint, 'swim:meta:router', 'gateway/info', handle);
-  });
-
-  it('should handle coincident links', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
+  it('should receive events from multicast links', function (done) {
+    var nodeUri = resolve(hostUri, 'house/kitchen#light');
+    var body = recon.parse('@switch { level: 100 }');
     var linkCount = 0;
-    var eventCount = 0;
     socket.receive = function (request) {
-      if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-      }
-    };
-    function onEvent() {
-      eventCount += 1;
-      if (eventCount === 3) done();
-    }
-    function onLinked() {
       linkCount += 1;
-      if (linkCount === 2) swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle3);
-      else if (linkCount === 3) socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', undefined, record));
+      assert(request.isLinkRequest);
+      assert.equal(request.node, 'house/kitchen#light');
+      assert.equal(request.lane, 'light/on');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      if (linkCount === 2) socket.send(new proto.EventMessage('house/kitchen#light', 'light/on', body));
+    };
+    var eventCount = 0;
+    function onEvent(message) {
+      eventCount += 1;
+      assert.equal(message.node, nodeUri);
+      assert.equal(message.lane, 'light/on');
+      assert.same(message.body, body);
+      if (eventCount === 2) done();
     }
-    var handle1 = {
-      onEvent: onEvent,
-      onLinked: onLinked
-    };
-    var handle2 = {
-      onEvent: onEvent,
-      onLinked: onLinked
-    };
-    var handle3 = {
-      onEvent: onEvent,
-      onLinked: onLinked
-    };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle1);
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle2);
+    var downlink1 = client.link(nodeUri, 'light/on');
+    var downlink2 = client.link(nodeUri, 'light/on');
+    downlink1.onEvent = onEvent;
+    downlink2.onEvent = onEvent;
   });
 
-  it('should connect pending links', function (done) {
-    var connectionCount = 0;
+  it('should close links that fail to connect', function (done) {
+    var connectCount = 0;
     socket.receive = function (request) {
-      if (connectionCount === 0) {
+      connectCount += 1;
+      assert.equal(connectCount, 1);
+      socket.close();
+    };
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    downlink.onClose = function () {
+      done();
+    };
+  });
+
+  it('should retry keepalive links that fail to connect', function (done) {
+    var connectCount = 0;
+    socket.receive = function (request) {
+      connectCount += 1;
+      if (connectCount <= 2) {
         socket.close();
-        connectionCount += 1;
-      }
-      else if (request.isLinkRequest) {
+      } else {
+        assert(request.isLinkRequest);
         socket.send(new proto.LinkedResponse(request.node, request.lane));
       }
     };
-    var handle = {
-      onLinked: function () {
-        swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-        done();
-      }
-    };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-  });
-
-  it('should reconnect broken links', function (done) {
-    var connectionCount = 0;
-    socket.receive = function (request) {
-      if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        if (connectionCount === 0) {
-          socket.close();
-          connectionCount += 1;
-        }
-      }
-    };
-    var state = 0;
-    var handle = {
-      onLinked: function () {
-        assert.equal(state, 0);
-        state = 1;
-      },
-      onBroken: function () {
-        assert.equal(state, 1);
-        state = 2;
-      },
-      onUnbroken: function () {
-        assert.equal(state, 2);
-        swim.unlink(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-        done();
-      }
-    };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-  });
-
-  it('should fail rejected links', function (done) {
-    socket.receive = function (request) {
-      if (request.isLinkRequest) {
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
-      }
-    };
-    var handle = {
-      onFailed: function () {
-        done();
-      }
-    };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-  });
-
-  it('should handle unlinks', function (done) {
-    socket.receive = function (request) {
-      if (request.isLinkRequest) {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.UnlinkedResponse(request.node, request.lane));
-      }
-    };
-    var handle = {
-      onUnlinked: function () {
-        done();
-      }
-    };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light/on', handle);
-  });
-
-  it('should receive child lane events', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
-    socket.receive = function (request) {
-      if (request.isLinkRequest && request.node === 'house/kitchen#light' && request.lane === 'light') {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.EventMessage('house/kitchen#light', 'light/on?foo#bar', undefined, record));
-      }
-    };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light', function (response) {
-      assert.equal(response.node, 'house/kitchen#light');
-      assert.equal(response.lane, 'light/on?foo#bar');
-      assert.same(response.body, record);
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on', {keepAlive: true});
+    var disconnectCount = 0;
+    downlink.onLinked = function (response) {
+      assert.equal(disconnectCount, 2);
+      downlink.close();
       done();
-    });
+    };
+    downlink.onDisconnect = function () {
+      disconnectCount += 1;
+    };
   });
 
-  it('should receive child lane commands', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
+  it('should close links when the connection closes', function (done) {
+    var connectCount = 0;
     socket.receive = function (request) {
-      if (request.isLinkRequest && request.node === 'house/kitchen#light' && request.lane === 'light') {
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-        socket.send(new proto.CommandMessage('house/kitchen#light', 'light/on?foo#bar', undefined, record));
+      connectCount += 1;
+      assert.equal(connectCount, 1);
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.close();
+    };
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var linkCount = 0;
+    downlink.onLinked = function (response) {
+      linkCount += 1;
+      assert.equal(linkCount, 1);
+    };
+    downlink.onClose = function () {
+      assert.equal(linkCount, 1);
+      done();
+    };
+  });
+
+  it('should reconnect keepalive links when the connection closes', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.close();
+    };
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on', {keepAlive: true});
+    var linkCount = 0;
+    var disconnectCount = 0;
+    downlink.onLinked = function (response) {
+      linkCount += 1;
+    };
+    downlink.onDisconnect = function (response) {
+      disconnectCount += 1;
+      assert.equal(linkCount, disconnectCount);
+      if (disconnectCount === 3) {
+        downlink.close();
+        done();
       }
     };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light', function (response) {
-      assert.equal(response.node, 'house/kitchen#light');
-      assert.equal(response.lane, 'light/on?foo#bar');
-      assert.same(response.body, record);
+  });
+
+  it('should change the keepalive mode of active links', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.close();
+    };
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var linkCount = 0;
+    var disconnectCount = 0;
+    downlink.onLinked = function (response) {
+      linkCount += 1;
+      if (linkCount === 1) {
+        assert(!downlink.keepAlive);
+        downlink.keepAlive = true;
+        assert(downlink.keepAlive);
+      } else if (linkCount === 2) {
+        assert(downlink.keepAlive);
+        downlink.keepAlive = false;
+        assert(!downlink.keepAlive);
+      }
+    };
+    downlink.onDisconnect = function (response) {
+      disconnectCount += 1;
+      assert.equal(linkCount, disconnectCount);
+    };
+    downlink.onClose = function () {
+      assert.equal(linkCount, 2);
+      assert.equal(disconnectCount, 2);
       done();
-    });
+    };
+  });
+
+  it('should return the connected state of active links', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
+      socket.close();
+    };
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    downlink.onLinked = function (response) {
+      assert(downlink.connected);
+    };
+    downlink.onDisconnect = function (response) {
+      assert(!downlink.connected);
+      done();
+    };
+  });
+
+  it('should close unlinked links', function (done) {
+    socket.receive = function (request) {
+      assert(request.isLinkRequest);
+      socket.send(new proto.UnlinkedResponse(request.node, request.lane));
+    };
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    var unlinkCount = 0;
+    downlink.onUnlinked = function () {
+      unlinkCount += 1;
+    };
+    downlink.onClose = function () {
+      assert.equal(unlinkCount, 1);
+      done();
+    };
   });
 
   it('should ignore non-text frames', function (done) {
     socket.receive = function (request) {
-      if (request.isLinkRequest && request.node === 'house/kitchen#light' && request.lane === 'light') {
-        socket.sendBytes(new Buffer(0));
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-      }
+      assert(request.isLinkRequest);
+      socket.sendBytes(new Buffer(0));
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var handle = {
-      onLinked: function (envelope) {
-        done();
-      }
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    downlink.onLinked = function (response) {
+      done();
     };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light', handle);
   });
 
   it('should ignore invalid envelopes', function (done) {
     socket.receive = function (request) {
-      if (request.isLinkRequest && request.node === 'house/kitchen#light' && request.lane === 'light') {
-        socket.sendText('@foo');
-        socket.send(new proto.LinkedResponse(request.node, request.lane));
-      }
+      assert(request.isLinkRequest);
+      socket.sendText('@foo');
+      socket.send(new proto.LinkedResponse(request.node, request.lane));
     };
-    var handle = {
-      onLinked: function (envelope) {
-        done();
-      }
+    var downlink = client.link(resolve(hostUri, 'house/kitchen#light'), 'light/on');
+    downlink.onLinked = function (response) {
+      done();
     };
-    swim.link(resolve(endpoint, 'house/kitchen#light'), 'light', handle);
   });
 
-  it('should send events', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
+  it('should buffer a limited number of commands', function (done) {
+    var receiveCount = 0;
     socket.receive = function (message) {
-      if (message.isEventMessage) {
-        assert.equal(message.node, 'house/kitchen#light');
-        assert.equal(message.lane, 'light/on');
-        assert.same(message.body, record);
-        done();
-      }
+      receiveCount += 1;
+      assert(receiveCount <= 1024);
+      if (receiveCount === 1024) setTimeout(done, 100);
     };
-    swim.sendEvent(resolve(endpoint, 'house/kitchen#light'), 'light/on', record);
-  });
-
-  it('should send commands', function (done) {
-    var record = recon.parse('@switch { level: 0 }');
-    socket.receive = function (message) {
-      if (message.isCommandMessage) {
-        assert.equal(message.node, 'house');
-        assert.equal(message.lane, 'light/off');
-        assert.same(message.body, record);
-        done();
-      }
-    };
-    swim.sendCommand(resolve(endpoint, 'house'), 'light/off', record);
-  });
-
-  it('should send proxied events', function (done) {
-    var record = recon.parse('@gateway');
-    socket.receive = function (message) {
-      if (message.isEventMessage) {
-        assert.equal(message.node, 'swim:meta:router');
-        assert.equal(message.lane, 'gateway/info');
-        assert.same(message.body, record);
-        done();
-      }
-    };
-    swim.sendProxyEvent(endpoint, 'swim:meta:router', 'gateway/info', record);
-  });
-
-  it('should send proxied commands', function (done) {
-    var record = recon.parse('@gateway');
-    socket.receive = function (message) {
-      if (message.isCommandMessage) {
-        assert.equal(message.node, 'swim:meta:router');
-        assert.equal(message.lane, 'gateway/info');
-        assert.same(message.body, record);
-        done();
-      }
-    };
-    swim.sendProxyCommand(endpoint, 'swim:meta:router', 'gateway/info', record);
-  });
-
-  it('should buffer a limited number of sends', function (done) {
-    var record = recon.parse('@switch { level: 100 }');
-    socket.receive = function (message) {};
     for (var i = 0; i < 2048; i += 1) {
-      swim.sendEvent(resolve(endpoint, 'house/kitchen#light'), 'light/on', record);
+      client.command(resolve(hostUri, 'house/kitchen#light'), 'light/on');
     }
-    done(); // TODO: Verify dropped frames
   });
 });

@@ -43,12 +43,9 @@ var sources = scripts.concat(tests);
 
 function generatedConfig() {
   var config = {
-    version: pkg.version,
-    SEND_BUFFER_SIZE: 1024,
-    MAX_RECONNECT_TIME: 15000
+    version: pkg.version
   };
-  if (proto) config.proto = proto;
-  fs.writeFileSync(configFile, JSON.stringify(config));
+  fs.writeFileSync(configFile, JSON.stringify(config) + '\n');
   return gulp.src(configFile);
 }
 

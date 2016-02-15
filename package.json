@@ -1,9 +1,9 @@
 {
   "name": "swim-client-js",
-  "version": "0.3.3",
-  "description": "SWIM Client JavaScript Implementation",
-  "homepage": "https://github.com/web-aware/swim-client-js",
-  "author": "Chris Sachs <chris@webaware.com>",
+  "version": "0.4.0",
+  "description": "Swim Client JavaScript Implementation",
+  "homepage": "https://github.com/swimit/swim-client-js",
+  "author": "Chris Sachs <chris@swim.it>",
   "license": "Apache-2.0",
   "keywords": [
     "actor",
@@ -26,12 +26,12 @@
     "web"
   ],
   "dependencies": {
-    "recon-js": "^0.3.3",
-    "swim-proto-js": "^0.3.0",
+    "recon-js": "^0.3.6",
+    "swim-proto-js": "^0.4.0",
     "websocket": "^1.0.21"
   },
   "devDependencies": {
-    "browserify": "^12.0.1",
+    "browserify": "^13.0.0",
     "coveralls": "^2.11.4",
     "del": "^2.2.0",
     "gulp": "^3.9.0",
@@ -53,10 +53,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/web-aware/swim-client-js.git"
+    "url": "https://github.com/swimit/swim-client-js.git"
   },
   "bugs": {
-    "url": "https://github.com/web-aware/swim-client-js/issues"
+    "url": "https://github.com/swimit/swim-client-js/issues"
   },
   "scripts": {
     "test": "gulp",

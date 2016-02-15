@@ -5,412 +5,830 @@ var recon = require('recon-js');
 var proto = require('swim-proto-js');
 var WebSocket = global.WebSocket || require('websocket').w3cwebsocket;
 
-var LINK_FAILED = -2;
-var LINK_BROKEN = -1;
-var LINK_WANTED = 0;
-var LINK_ACTIVE = 1;
 
-function auth(node, query) {
-  Channel.auth(node, query);
+function Client(options) {
+  options = options || {};
+  Object.defineProperty(this, 'options', {value: options, enumerable: true});
+  Object.defineProperty(this, 'channels', {value: {}, configurable: true});
 }
-
-function sync(node, lane, handle) {
-  Channel.get(node).sync(node, lane, handle);
-}
-
-function link(node, lane, handle) {
-  Channel.get(node).link(node, lane, handle);
-}
-
-function unlink(node, lane, handle) {
-  Channel.get(node).unlink(node, lane, handle);
-}
-
-function sendEvent(node, lane, body) {
-  Channel.get(node).sendEvent(node, lane, body);
-}
-
-function sendCommand(node, lane, body) {
-  Channel.get(node).sendCommand(node, lane, body);
-}
-
-function proxySync(proxy, node, lane, handle) {
-  Channel.get(proxy).sync(node, lane, handle);
-}
-
-function proxyLink(proxy, node, lane, handle) {
-  Channel.get(proxy).link(node, lane, handle);
-}
-
-function sendProxyEvent(proxy, node, lane, body) {
-  Channel.get(proxy).sendEvent(node, lane, body);
-}
-
-function sendProxyCommand(proxy, node, lane, body) {
-  Channel.get(proxy).sendCommand(node, lane, body);
-}
-
-function reset() {
-  for (var endpoint in Channel.bridge) {
-    var channel = Channel.bridge[endpoint];
-    channel.sendBuffer = [];
-    channel.unlinkAll();
-    channel.close();
+Client.prototype.getOrCreateChannel = function (hostUri) {
+  var channel = this.channels[hostUri];
+  if (channel === undefined) {
+    channel = new Channel(hostUri, this.options);
+    this.channels[hostUri] = channel;
   }
-  Channel.bridge = {};
-}
-
-
-function Channel(node, query) {
-  Channel.bridge[node] = this;
-  this.node = node;
-  this.query = query;
-  this.linkCount = 0;
-  this.linkHandles = {};
-  this.sendBuffer = [];
-  this.reconnectTimeout = null;
-  this.reconnectTime = 250 + Math.round(Math.random() * 750);
-  this.closed = false;
-  this.open();
-}
-Channel.prototype.open = function () {
-  var requestUri = this.node;
-  if (this.query) requestUri = requestUri + '?' + this.query;
-  this.socket = new WebSocket(requestUri, config.proto);
-  this.socket.onopen = this.onOpen.bind(this);
-  this.socket.onclose = this.onClose.bind(this);
-  this.socket.onmessage = this.onFrame.bind(this);
-  this.socket.onerror = this.onError.bind(this);
-};
-Channel.prototype.close = function () {
-  this.closed = true;
-  this.socket.close();
-};
-Channel.prototype.send = function (envelope) {
-  if (this.socket.readyState !== this.socket.OPEN) this.buffer(envelope);
-  else this.socket.send(proto.stringify(envelope));
-};
-Channel.prototype.buffer = function (envelope) {
-  if (envelope.isSyncRequest || envelope.isLinkRequest || envelope.isUnlinkRequest) return;
-  if (this.sendBuffer.length > config.SEND_BUFFER_SIZE) return; // TODO: Notify
-  this.sendBuffer.push(envelope);
-};
-Channel.prototype.onOpen = function () {
-  clearTimeout(this.reconnectTimeout);
-  this.reconnectTime = 250 + Math.round(Math.random() * 750);
-
-  var envelope;
-  for (var node in this.linkHandles) {
-    var nodeHandles = this.linkHandles[node];
-    for (var lane in nodeHandles) {
-      var laneHandles = nodeHandles[lane];
-      var synced = false;
-      for (var i = 0, n = laneHandles.length; !synced && i < n; i += 1) {
-        var handle = laneHandles[i];
-        var state = handle.__swim_link_state__;
-        synced = synced || state.synced;
-      }
-      if (synced) envelope = new proto.SyncRequest(this.unresolve(node), lane);
-      else envelope = new proto.LinkRequest(this.unresolve(node), lane);
-      this.send(envelope);
-    }
-  }
-
-  while ((envelope = this.sendBuffer.shift())) this.send(envelope);
-};
-Channel.prototype.onClose = function () {
-  if (!this.closed && this.linkCount === 0 && this.sendBuffer.length === 0) {
-    delete Channel.bridge[this.node];
-    return;
-  }
-
-  for (var node in this.linkHandles) {
-    var nodeHandles = this.linkHandles[node];
-    for (var lane in nodeHandles) {
-      var laneHandles = nodeHandles[lane];
-      for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-        var handle = laneHandles[i];
-        var state = handle.__swim_link_state__;
-        if (state.status === LINK_ACTIVE) {
-          if (typeof handle.onBroken === 'function') {
-            handle.onBroken.call(handle, node, lane);
-          }
-          state.status = LINK_BROKEN;
-        }
-      }
-    }
-  }
-
-  if (!this.closed) {
-    this.reconnectTimeout = setTimeout(this.open.bind(this), this.reconnectTime);
-    this.reconnectTime = Math.min(2 * this.reconnectTime, config.MAX_RECONNECT_TIME);
-  }
-};
-Channel.prototype.onError = function () {
-  if (this.socket.readyState === this.socket.OPEN) {
-    this.socket.close();
-  }
-};
-Channel.prototype.onFrame = function (frame) {
-  var payload = frame.data;
-  if (typeof payload === 'string') {
-    var envelope = proto.parse(payload);
-    if (envelope) this.onReceive(envelope);
-  }
-};
-Channel.prototype.initHandle = function (handle, synced) {
-  if (typeof handle === 'function') handle = {
-    onEvent: handle,
-    onCommand: handle
-  };
-  var state = {
-    status: LINK_WANTED,
-    synced: synced
-  };
-  Object.defineProperty(handle, '__swim_link_state__', {value: state, configurable: true});
-  return handle;
-};
-Channel.prototype.registerHandle = function (node, lane, handle) {
-  var unlinked = false;
-  var nodeHandles = this.linkHandles[node];
-  if (nodeHandles === undefined) {
-    nodeHandles = {};
-    this.linkHandles[node] = nodeHandles;
-  }
-  var laneHandles = nodeHandles[lane];
-  if (laneHandles === undefined) {
-    unlinked = true;
-    laneHandles = [];
-    nodeHandles[lane] = laneHandles;
-  }
-  laneHandles.push(handle);
-  return unlinked;
-};
-Channel.prototype.unregisterHandle = function (node, lane, handle) {
-  var nodeHandles = this.linkHandles[node];
-  if (nodeHandles === undefined) return;
-  var laneHandles = nodeHandles[lane];
-  if (laneHandles === undefined) return;
-  var index = -1;
-  if (handle instanceof Function) for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-    if (laneHandles[i].onEvent === handle) { index = i; break; }
-  }
-  else index = laneHandles.indexOf(handle);
-  if (index < 0) return false;
-  laneHandles.splice(index, 1);
-  var unlinked = laneHandles.length === 0;
-  if (unlinked) {
-    delete nodeHandles[lane];
-    if (Object.keys(nodeHandles).length === 0) delete this.linkHandles[node];
-  }
-  return unlinked;
-};
-Channel.prototype.sync = function (node, lane, handle) {
-  handle = this.initHandle(handle, true);
-  var unlinked = this.registerHandle(node, lane, handle);
-  var request = new proto.SyncRequest(this.unresolve(node), lane);
-  this.send(request);
-  if (unlinked) {
-    this.linkCount += 1;
-  }
-};
-Channel.prototype.link = function (node, lane, handle) {
-  handle = this.initHandle(handle, false);
-  var unlinked = this.registerHandle(node, lane, handle);
-  if (unlinked) {
-    var request = new proto.LinkRequest(this.unresolve(node), lane);
-    this.send(request);
-    this.linkCount += 1;
-  }
-  else if (this.socket.readyState === this.socket.OPEN) {
-    var state = handle.__swim_link_state__;
-    state.status = LINK_ACTIVE;
-    if (typeof handle.onLinked === 'function') {
-      handle.onLinked.call(handle, node, lane);
-    }
-  }
-};
-Channel.prototype.unlink = function (node, lane, handle) {
-  var unlinked = this.unregisterHandle(node, lane, handle);
-  if (unlinked) {
-    var request = new proto.UnlinkRequest(this.unresolve(node), lane);
-    this.send(request);
-    this.linkCount -= 1;
-  }
-};
-Channel.prototype.unlinkAll = function () {
-  for (var node in this.linkHandles) {
-    var nodeHandles = this.linkHandles[node];
-    for (var lane in nodeHandles) {
-      var laneHandles = nodeHandles[lane];
-      for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-        var handle = laneHandles[i];
-        var state = handle.__swim_link_state__;
-        if (typeof handle.onFailed === 'function') {
-          handle.onFailed.call(handle, node, lane);
-        }
-        state.status = LINK_FAILED;
-      }
-    }
-  }
-  this.linkCount = 0;
-  this.linkHandles = {};
-};
-Channel.prototype.sendEvent = function (node, lane, body) {
-  var message = new proto.EventMessage(this.unresolve(node), lane, undefined, body);
-  this.send(message);
-};
-Channel.prototype.sendCommand = function (node, lane, body) {
-  var message = new proto.CommandMessage(this.unresolve(node), lane, undefined, body);
-  this.send(message);
-};
-Channel.prototype.onReceive = function (envelope) {
-  if (envelope.isEventMessage) this.onMessage(envelope);
-  else if (envelope.isCommandMessage) this.onMessage(envelope);
-  else if (envelope.isSyncedResponse) this.onSynced(envelope);
-  else if (envelope.isLinkedResponse) this.onLinked(envelope);
-  else if (envelope.isUnlinkedResponse) this.onUnlinked(envelope);
-};
-Channel.prototype.onMessage = function (envelope) {
-  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
-  var nodeHandles = this.linkHandles[node];
-  if (nodeHandles === undefined) return;
-
-  var lane = envelope.lane;
-  while (lane) {
-    var laneHandles = nodeHandles[lane];
-    if (laneHandles) for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-      var handle = laneHandles[i];
-      if (envelope.isEventMessage) {
-        if (typeof handle.onEvent === 'function') {
-          handle.onEvent.call(handle, envelope);
-        }
-      }
-      else if (envelope.isCommandMessage) {
-        if (typeof handle.onCommand === 'function') {
-          handle.onCommand.call(handle, envelope);
-        }
-      }
-    }
-    lane = Channel.parentLane(lane);
-  }
-};
-Channel.prototype.onSynced = function (envelope) {
-  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
-  var lane = envelope.lane;
-  var nodeHandles = this.linkHandles[node];
-  if (nodeHandles === undefined) return;
-  var laneHandles = nodeHandles[lane];
-  if (laneHandles === undefined) return;
-  for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-    var handle = laneHandles[i];
-    if (typeof handle.onLinked === 'function') {
-      handle.onSynced.call(handle, node, lane);
-    }
-  }
-};
-Channel.prototype.onLinked = function (envelope) {
-  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
-  var lane = envelope.lane;
-  var nodeHandles = this.linkHandles[node];
-  if (nodeHandles === undefined) return;
-  var laneHandles = nodeHandles[lane];
-  if (laneHandles === undefined) return;
-  for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-    var handle = laneHandles[i];
-    var state = handle.__swim_link_state__;
-    if (state.status === LINK_BROKEN) {
-      if (typeof handle.onUnbroken === 'function') {
-        handle.onUnbroken.call(handle, node, lane);
-      }
-    }
-    else if (typeof handle.onLinked === 'function') {
-      handle.onLinked.call(handle, node, lane);
-    }
-    state.status = LINK_ACTIVE;
-  }
-};
-Channel.prototype.onUnlinked = function (envelope) {
-  var node = recon.uri.stringify(recon.uri.resolve(this.node, envelope.node));
-  var lane = envelope.lane;
-  var nodeHandles = this.linkHandles[node];
-  if (nodeHandles === undefined) return;
-  var laneHandles = nodeHandles[lane];
-  if (laneHandles === undefined) return;
-  for (var i = 0, n = laneHandles.length; i < n; i += 1) {
-    var handle = laneHandles[i];
-    var state = handle.__swim_link_state__;
-    if (state.status === LINK_ACTIVE) {
-      if (typeof handle.onUnlinked === 'function') {
-        handle.onUnlinked.call(handle, node, lane);
-      }
-      state.status = LINK_WANTED;
-    }
-    else {
-      if (typeof handle.onFailed === 'function') {
-        handle.onFailed.call(handle, node, lane);
-      }
-      state.status = LINK_FAILED;
-    }
-  }
-  delete nodeHandles[lane];
-  if (Object.keys(nodeHandles).length === 0) delete this.linkHandles[node];
-  this.linkCount -= 1;
-};
-Channel.prototype.unresolve = function (node) {
-  return recon.uri.stringify(recon.uri.unresolve(this.node, node));
-};
-Channel.bridge = {};
-Channel.get = function (node) {
-  var endpoint = Channel.endpoint(node);
-  var channel = Channel.bridge[endpoint];
-  if (channel === undefined) channel = new Channel(endpoint);
   return channel;
 };
-Channel.auth = function (node, query) {
-  var endpoint = Channel.endpoint(node);
-  var channel = Channel.bridge[endpoint];
-  if (channel) {
-    channel.unlinkAll();
-    channel.close();
-    delete Channel.bridge[endpoint];
+Client.prototype.link = function () {
+  var hostUri, nodeUri, laneUri, options;
+  if (arguments.length === 2) {
+    options = {};
+    laneUri = arguments[1];
+    nodeUri = arguments[0];
+    hostUri = Client.extractHostUri(nodeUri);
+  } else if (arguments.length === 3) {
+    if (typeof arguments[2] === 'object') {
+      options = arguments[2];
+      laneUri = arguments[1];
+      nodeUri = arguments[0];
+      hostUri = Client.extractHostUri(nodeUri);
+    } else {
+      hostUri = arguments[0];
+      nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+      laneUri = arguments[2];
+      options = {};
+    }
+  } else {
+    hostUri = arguments[0];
+    nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+    laneUri = arguments[2];
+    options = arguments[3];
   }
-  channel = new Channel(endpoint, query);
-  return channel;
+  var channel = this.getOrCreateChannel(hostUri);
+  return channel.link(nodeUri, laneUri, options);
 };
-Channel.endpoint = function (node) {
-  var components = recon.uri.parse(node);
-  var scheme = components.scheme;
+Client.prototype.sync = function () {
+  var hostUri, nodeUri, laneUri, options;
+  if (arguments.length === 2) {
+    options = {};
+    laneUri = arguments[1];
+    nodeUri = arguments[0];
+    hostUri = Client.extractHostUri(nodeUri);
+  } else if (arguments.length === 3) {
+    if (typeof arguments[2] === 'object') {
+      options = arguments[2];
+      laneUri = arguments[1];
+      nodeUri = arguments[0];
+      hostUri = Client.extractHostUri(nodeUri);
+    } else {
+      hostUri = arguments[0];
+      nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+      laneUri = arguments[2];
+      options = {};
+    }
+  } else {
+    hostUri = arguments[0];
+    nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+    laneUri = arguments[2];
+    options = arguments[3];
+  }
+  var channel = this.getOrCreateChannel(hostUri);
+  return channel.sync(nodeUri, laneUri, options);
+};
+Client.prototype.command = function () {
+  var hostUri, nodeUri, laneUri, body;
+  if (arguments.length === 3) {
+    body = arguments[2];
+    laneUri = arguments[1];
+    nodeUri = arguments[0];
+    hostUri = Client.extractHostUri(nodeUri);
+  } else {
+    hostUri = arguments[0];
+    nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+    laneUri = arguments[2];
+    body = arguments[3];
+  }
+  var channel = this.getOrCreateChannel(hostUri);
+  channel.command(nodeUri, laneUri, body);
+};
+Client.prototype.host = function (hostUri) {
+  var channel = this.getOrCreateChannel(hostUri);
+  return new HostScope(channel, hostUri);
+};
+Client.prototype.node = function () {
+  var hostUri, nodeUri;
+  if (arguments.length === 1) {
+    nodeUri = arguments[0];
+    hostUri = Client.extractHostUri(nodeUri);
+  } else {
+    hostUri = arguments[0];
+    nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+  }
+  var channel = this.getOrCreateChannel(hostUri);
+  return new NodeScope(channel, hostUri, nodeUri);
+};
+Client.prototype.lane = function () {
+  var hostUri, nodeUri, laneUri;
+  if (arguments.length === 2) {
+    laneUri = arguments[1];
+    nodeUri = arguments[0];
+    hostUri = Client.extractHostUri(nodeUri);
+  } else {
+    hostUri = arguments[0];
+    nodeUri = Client.resolveNodeUri(hostUri, arguments[1]);
+    laneUri = arguments[2];
+  }
+  var channel = this.getOrCreateChannel(hostUri);
+  return new LaneScope(channel, hostUri, nodeUri, laneUri);
+};
+Client.prototype.close = function () {
+  var channels = this.channels;
+  Object.defineProperty(this, 'channels', {value: {}, configurable: true});
+  for (var hostUri in channels) {
+    var channel = channels[hostUri];
+    channel.close();
+  }
+};
+Client.extractHostUri = function (nodeUri) {
+  var uri = recon.uri.parse(nodeUri);
+  var scheme = uri.scheme;
   if (scheme === 'swim') scheme = 'ws';
   else if (scheme === 'swims') scheme = 'wss';
   return recon.uri.stringify({
     scheme: scheme,
-    authority: components.authority
+    authority: uri.authority
   });
 };
-Channel.parentLane = function (lane) {
-  var components = recon.uri.parse(lane);
-  var path = components.path;
-  if (components.query && components.fragment) return recon.uri.stringify({
-    path: path,
-    query: components.query
+Client.resolveNodeUri = function (hostUri, nodeUri) {
+  return recon.uri.stringify(recon.uri.resolve(hostUri, nodeUri));
+};
+
+
+function Scope() {
+  Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
+}
+Scope.prototype.registerDownlink = function (downlink) {
+  var scope = this;
+  Object.defineProperty(downlink, 'onChannelClose', {
+    value: function () {
+      scope.unregisterDownlink(downlink);
+      downlink.__proto__.onChannelClose.call(downlink);
+    },
+    configurable: true
   });
-  else if (components.query) return recon.uri.stringify({path: path});
-  else if (path.length > 0) {
-    return recon.uri.stringify({path: path.slice(0, path.length - 1)});
+  this.downlinks.push(downlink);
+};
+Scope.prototype.unregisterDownlink = function (downlink) {
+  for (var i = 0, n = this.downlinks.length; i < n; i += 1) {
+    if (downlink === this.downlinks[i]) {
+      this.downlinks.splice(i, 1);
+      return;
+    }
+  }
+};
+Scope.prototype.close = function () {
+  var downlinks = this.downlinks;
+  Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
+  for (var i = 0, n = downlinks.length; i < n; i += 1) {
+    var downlink = downlinks[i];
+    downlink.__proto__.onChannelClose.call(downlink);
   }
 };
 
 
-exports.auth = auth;
-exports.sync = sync;
-exports.link = link;
-exports.unlink = unlink;
-exports.sendEvent = sendEvent;
-exports.sendCommand = sendCommand;
-exports.proxySync = proxySync;
-exports.proxyLink = proxyLink;
-exports.sendProxyEvent = sendProxyEvent;
-exports.sendProxyCommand = sendProxyCommand;
-exports.reset = reset;
-exports.config = config;
+function HostScope(channel, hostUri) {
+  Scope.call(this);
+  Object.defineProperty(this, 'channel', {value: channel});
+  Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
+  Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
+}
+HostScope.prototype = Object.create(Scope.prototype);
+HostScope.prototype.constructor = HostScope;
+HostScope.prototype.link = function (nodeUri, laneUri, options) {
+  var downlink = this.channel.link(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+HostScope.prototype.sync = function (nodeUri, laneUri, options) {
+  var downlink = this.channel.sync(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+HostScope.prototype.command = function (nodeUri, laneUri, body) {
+  this.channel.command(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, body);
+};
+HostScope.prototype.node = function (nodeUri) {
+  return new NodeScope(this.channel, this.hostUri, Client.resolveNodeUri(this.hostUri, nodeUri));
+};
+HostScope.prototype.lane = function (nodeUri, laneUri) {
+  return new LaneScope(this.channel, this.hostUri, Client.resolveNodeUri(this.hostUri, nodeUri), laneUri);
+};
+
+
+function NodeScope(channel, hostUri, nodeUri) {
+  Scope.call(this);
+  Object.defineProperty(this, 'channel', {value: channel});
+  Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
+  Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
+  Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
+}
+NodeScope.prototype = Object.create(Scope.prototype);
+NodeScope.prototype.constructor = NodeScope;
+NodeScope.prototype.link = function (laneUri, options) {
+  var downlink = this.channel.link(this.nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+NodeScope.prototype.sync = function (laneUri, options) {
+  var downlink = this.channel.sync(this.nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+NodeScope.prototype.command = function (laneUri, body) {
+  this.channel.command(this.nodeUri, laneUri, body);
+};
+NodeScope.prototype.lane = function (laneUri) {
+  return new LaneScope(this.channel, this.hostUri, this.nodeUri, laneUri);
+};
+
+
+function LaneScope(channel, hostUri, nodeUri, laneUri) {
+  Scope.call(this);
+  Object.defineProperty(this, 'channel', {value: channel});
+  Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
+  Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
+  Object.defineProperty(this, 'laneUri', {value: laneUri, enumerable: true});
+  Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
+}
+LaneScope.prototype = Object.create(Scope.prototype);
+LaneScope.prototype.constructor = LaneScope;
+LaneScope.prototype.link = function (options) {
+  var downlink = this.channel.link(this.nodeUri, this.laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+LaneScope.prototype.sync = function (options) {
+  var downlink = this.channel.sync(this.nodeUri, this.laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+LaneScope.prototype.command = function (body) {
+  this.channel.command(this.nodeUri, this.laneUri, body);
+};
+
+
+function Channel(hostUri, options) {
+  Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
+  Object.defineProperty(this, 'options', {value: options, enumerable: true});
+  Object.defineProperty(this, 'uriCache', {value: new UriCache(hostUri), configurable: true});
+  Object.defineProperty(this, 'downlinks', {value: {}, configurable: true});
+  Object.defineProperty(this, 'sendBuffer', {value: [], configurable: true});
+  Object.defineProperty(this, 'reconnectTimer', {value: null, writable: true});
+  Object.defineProperty(this, 'reconnectTimeout', {value: 0, writable: true});
+  Object.defineProperty(this, 'idleTimer', {value: null, writable: true});
+  Object.defineProperty(this, 'socket', {value: null, writable: true});
+}
+Object.defineProperty(Channel.prototype, 'protocols', {
+  get: function () {
+    return this.options.protocols;
+  }
+});
+Object.defineProperty(Channel.prototype, 'maxReconnectTimeout', {
+  get: function () {
+    return this.options.maxReconnectTimeout || 30000;
+  }
+});
+Object.defineProperty(Channel.prototype, 'idleTimeout', {
+  get: function () {
+    return this.options.idleTimeout || 1000;
+  }
+});
+Object.defineProperty(Channel.prototype, 'sendBufferSize', {
+  get: function () {
+    return this.options.sendBufferSize || 1024;
+  }
+});
+Channel.prototype.resolve = function (unresolvedUri) {
+  return this.uriCache.resolve(unresolvedUri);
+};
+Channel.prototype.unresolve = function (resolvedUri) {
+  return this.uriCache.unresolve(resolvedUri);
+};
+Channel.prototype.link = function (nodeUri, laneUri, options) {
+  var downlink = new ChannelLinkedDownlink(this, this.hostUri, nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+Channel.prototype.sync = function (nodeUri, laneUri, options) {
+  var downlink = new ChannelSyncedDownlink(this, this.hostUri, nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+Channel.prototype.command = function (nodeUri, laneUri, body) {
+  var message = new proto.CommandMessage(this.unresolve(nodeUri), laneUri, body);
+  this.push(message);
+};
+Channel.prototype.registerDownlink = function (downlink) {
+  this.clearIdle();
+  var nodeUri = downlink.nodeUri;
+  var laneUri = downlink.laneUri;
+  var nodeDownlinks = this.downlinks[nodeUri] || {};
+  var laneDownlinks = nodeDownlinks[laneUri] || [];
+  laneDownlinks.push(downlink);
+  nodeDownlinks[laneUri] = laneDownlinks;
+  this.downlinks[nodeUri] = nodeDownlinks;
+  if (this.socket && this.socket.readyState === this.socket.OPEN) {
+    downlink.onChannelConnect();
+  } else {
+    this.open();
+  }
+};
+Channel.prototype.unregisterDownlink = function (downlink) {
+  var nodeUri = downlink.nodeUri;
+  var laneUri = downlink.laneUri;
+  var nodeDownlinks = this.downlinks[nodeUri];
+  if (nodeDownlinks) {
+    var laneDownlinks = nodeDownlinks[laneUri];
+    if (laneDownlinks) {
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        if (laneDownlinks[i] === downlink) {
+          laneDownlinks.splice(i, 1);
+          if (laneDownlinks.length === 0) {
+            delete nodeDownlinks[laneUri];
+            if (Object.keys(nodeDownlinks).length === 0) {
+              delete this.downlinks[nodeUri];
+              this.watchIdle();
+            }
+            if (this.socket && this.socket.readyState === this.socket.OPEN) {
+              var request = new proto.UnlinkRequest(this.unresolve(nodeUri), laneUri);
+              downlink.onUnlinkRequest(request);
+              this.push(request);
+            }
+          }
+          downlink.onChannelClose();
+        }
+      }
+    }
+  }
+};
+Channel.prototype.onEnvelope = function (envelope) {
+  if (envelope.isEventMessage) {
+    this.onEventMessage(envelope);
+  } else if (envelope.isCommandMessage) {
+    this.onCommandMessage(envelope);
+  } else if (envelope.isLinkRequest) {
+    this.onLinkRequest(envelope);
+  } else if (envelope.isLinkedResponse) {
+    this.onLinkedResponse(envelope);
+  } else if (envelope.isSyncRequest) {
+    this.onSyncRequest(envelope);
+  } else if (envelope.isSyncedResponse) {
+    this.onSyncedResponse(envelope);
+  } else if (envelope.isUnlinkRequest) {
+    this.onUnlinkRequest(envelope);
+  } else if (envelope.isUnlinkedResponse) {
+    this.onUnlinkedResponse(envelope);
+  }
+};
+Channel.prototype.onEventMessage = function (message) {
+  var nodeUri = this.resolve(message.node);
+  var laneUri = message.lane;
+  var nodeDownlinks = this.downlinks[nodeUri];
+  if (nodeDownlinks) {
+    var laneDownlinks = nodeDownlinks[laneUri];
+    if (laneDownlinks) {
+      var resolvedMessage = message.withAddress(nodeUri);
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onEventMessage(resolvedMessage);
+      }
+    }
+  }
+};
+Channel.prototype.onCommandMessage = function (message) {
+  // TODO: Support client services.
+};
+Channel.prototype.onLinkRequest = function (request) {
+  // TODO: Support client services.
+};
+Channel.prototype.onLinkedResponse = function (response) {
+  var nodeUri = this.resolve(response.node);
+  var laneUri = response.lane;
+  var nodeDownlinks = this.downlinks[nodeUri];
+  if (nodeDownlinks) {
+    var laneDownlinks = nodeDownlinks[laneUri];
+    if (laneDownlinks) {
+      var resolvedResponse = response.withAddress(nodeUri);
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onLinkedResponse(resolvedResponse);
+      }
+    }
+  }
+};
+Channel.prototype.onSyncRequest = function (request) {
+  // TODO: Support client services.
+};
+Channel.prototype.onSyncedResponse = function (response) {
+  var nodeUri = this.resolve(response.node);
+  var laneUri = response.lane;
+  var nodeDownlinks = this.downlinks[nodeUri];
+  if (nodeDownlinks) {
+    var laneDownlinks = nodeDownlinks[laneUri];
+    if (laneDownlinks) {
+      var resolvedResponse = response.withAddress(nodeUri);
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onSyncedResponse(resolvedResponse);
+      }
+    }
+  }
+};
+Channel.prototype.onUnlinkRequest = function (request) {
+  // TODO: Support client services.
+};
+Channel.prototype.onUnlinkedResponse = function (response) {
+  var nodeUri = this.resolve(response.node);
+  var laneUri = response.lane;
+  var nodeDownlinks = this.downlinks[nodeUri];
+  if (nodeDownlinks) {
+    var laneDownlinks = nodeDownlinks[laneUri];
+    if (laneDownlinks) {
+      delete nodeDownlinks[laneUri];
+      if (Object.keys(nodeDownlinks).length === 0) {
+        delete this.downlinks[nodeUri];
+      }
+      var resolvedResponse = response.withAddress(nodeUri);
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onUnlinkedResponse(resolvedResponse);
+        downlink.onChannelClose();
+      }
+    }
+  }
+};
+Channel.prototype.onConnect = function () {
+  for (var nodeUri in this.downlinks) {
+    var nodeDownlinks = this.downlinks[nodeUri];
+    for (var laneUri in nodeDownlinks) {
+      var laneDownlinks = nodeDownlinks[laneUri];
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onChannelConnect();
+      }
+    }
+  }
+};
+Channel.prototype.onDisconnect = function () {
+  for (var nodeUri in this.downlinks) {
+    var nodeDownlinks = this.downlinks[nodeUri];
+    for (var laneUri in nodeDownlinks) {
+      var laneDownlinks = nodeDownlinks[laneUri].slice();
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onChannelDisconnect();
+      }
+    }
+  }
+};
+Channel.prototype.onError = function () {
+  for (var nodeUri in this.downlinks) {
+    var nodeDownlinks = this.downlinks[nodeUri];
+    for (var laneUri in nodeDownlinks) {
+      var laneDownlinks = nodeDownlinks[laneUri];
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onChannelError();
+      }
+    }
+  }
+};
+Channel.prototype.open = function () {
+  if (this.reconnectTimer) {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectTimeout = 0;
+  }
+  if (!this.socket) {
+    this.socket = new WebSocket(this.hostUri, this.protocols);
+    this.socket.onopen = this.onWebSocketOpen.bind(this);
+    this.socket.onmessage = this.onWebSocketMessage.bind(this);
+    this.socket.onerror = this.onWebSocketError.bind(this);
+    this.socket.onclose = this.onWebSocketClose.bind(this);
+  }
+};
+Channel.prototype.close = function () {
+  this.clearIdle();
+  if (this.socket) {
+    this.socket.close();
+    this.socket = null;
+  }
+  var downlinks = this.downlinks;
+  Object.defineProperty(this, 'downlinks', {value: {}, configurable: true});
+  for (var nodeUri in downlinks) {
+    var nodeDownlinks = downlinks[nodeUri];
+    for (var laneUri in nodeDownlinks) {
+      var laneDownlinks = nodeDownlinks[laneUri];
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onChannelClose();
+      }
+    }
+  }
+};
+Channel.prototype.reconnect = function () {
+  if (this.reconnectTimer) return;
+  if (!this.reconnectTimeout) {
+    var jitter = 1000 * Math.random();
+    this.reconnectTimeout = 500 + jitter;
+  } else {
+    var maxReconnectTimeout = this.maxReconnectTimeout || 30000;
+    this.reconnectTimeout = Math.min(1.8 * this.reconnectTimeout, maxReconnectTimeout);
+  }
+  this.reconnectTimer = setTimeout(this.open.bind(this), this.reconnectTimeout);
+};
+Channel.prototype.clearIdle = function () {
+  if (this.idleTimer) {
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+};
+Channel.prototype.watchIdle = function () {
+  if (this.socket && this.socket.readyState === this.socket.OPEN &&
+      this.sendBuffer.length === 0 && Object.keys(this.downlinks).length === 0) {
+    this.idleTimer = setTimeout(this.checkIdle.bind(this), this.idleTimeout);
+  }
+};
+Channel.prototype.checkIdle = function () {
+  if (this.sendBuffer.length === 0 && Object.keys(this.downlinks).length === 0) {
+    this.close();
+  }
+};
+Channel.prototype.push = function (envelope) {
+  if (this.socket && this.socket.readyState === this.socket.OPEN) {
+    this.clearIdle();
+    var text = proto.stringify(envelope);
+    this.socket.send(text);
+    this.watchIdle();
+  } else if (envelope.isCommandMessage) {
+    if (this.sendBuffer.length < this.sendBufferSize) {
+      this.sendBuffer.push(envelope);
+    } else {
+      // TODO
+    }
+    this.open();
+  }
+};
+Channel.prototype.onWebSocketOpen = function () {
+  this.onConnect();
+  var envelope;
+  while ((envelope = this.sendBuffer.shift())) {
+    this.push(envelope);
+  }
+  this.watchIdle();
+};
+Channel.prototype.onWebSocketMessage = function (message) {
+  var data = message.data;
+  if (typeof data === 'string') {
+    var envelope = proto.parse(data);
+    if (envelope) {
+      this.onEnvelope(envelope);
+    }
+  }
+};
+Channel.prototype.onWebSocketError = function () {
+  this.onError();
+  this.clearIdle();
+  if (this.socket) {
+    this.socket.onopen = null;
+    this.socket.onmessage = null;
+    this.socket.onerror = null;
+    this.socket.onclose = null;
+    this.socket.close();
+    this.socket = null;
+  }
+};
+Channel.prototype.onWebSocketClose = function () {
+  this.socket = null;
+  this.onDisconnect();
+  this.clearIdle();
+  if (this.sendBuffer.length > 0 || Object.keys(this.downlinks).length > 0) {
+    this.reconnect();
+  }
+};
+
+
+function ChannelDownlink(channel, hostUri, nodeUri, laneUri, options) {
+  options = options || {};
+  Object.defineProperty(this, 'channel', {value: channel});
+  Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
+  Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
+  Object.defineProperty(this, 'laneUri', {value: laneUri, enumerable: true});
+  Object.defineProperty(this, 'options', {value: options, enumerable: true});
+  Object.defineProperty(this, 'delegate', {value: this, writable: true});
+}
+Object.defineProperty(ChannelDownlink.prototype, 'prio', {
+  get: function () {
+    return this.options.prio || 0.0;
+  }
+});
+Object.defineProperty(ChannelDownlink.prototype, 'keepAlive', {
+  get: function () {
+    return this.options.keepAlive || false;
+  },
+  set: function (keepAlive) {
+    this.options.keepAlive = keepAlive;
+  }
+});
+Object.defineProperty(ChannelDownlink.prototype, 'connected', {
+  get: function () {
+    var socket = this.channel.socket;
+    return socket && socket.readyState === socket.OPEN;
+  },
+  enumerable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onEventMessage', {
+  value: function (message) {
+    if (typeof this.delegate.onEvent === 'function') {
+      this.delegate.onEvent(message);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onLinkRequest', {
+  value: function (request) {
+    if (typeof this.delegate.onLink === 'function') {
+      this.delegate.onLink(request);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onLinkedResponse', {
+  value: function (response) {
+    if (typeof this.delegate.onLinked === 'function') {
+      this.delegate.onLinked(response);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onSyncRequest', {
+  value: function (request) {
+    if (typeof this.delegate.onSync === 'function') {
+      this.delegate.onSync(request);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onSyncedResponse', {
+  value: function (response) {
+    if (typeof this.delegate.onSynced === 'function') {
+      this.delegate.onSynced(response);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onUnlinkRequest', {
+  value: function (request) {
+    if (typeof this.delegate.onUnlink === 'function') {
+      this.delegate.onUnlink(request);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onUnlinkedResponse', {
+  value: function (response) {
+    if (typeof this.delegate.onUnlinked === 'function') {
+      this.delegate.onUnlinked(response);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onChannelConnect', {
+  value: function () {
+    if (typeof this.delegate.onConnect === 'function') {
+      this.delegate.onConnect();
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onChannelDisconnect', {
+  value: function () {
+    if (typeof this.delegate.onDisconnect === 'function') {
+      this.delegate.onDisconnect();
+    }
+    if (!this.keepAlive) {
+      this.close();
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onChannelError', {
+  value: function () {
+    if (typeof this.delegate.onError === 'function') {
+      this.delegate.onError();
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ChannelDownlink.prototype, 'onChannelClose', {
+  value: function () {
+    if (typeof this.delegate.onClose === 'function') {
+      this.delegate.onClose();
+    }
+  },
+  configurable: true
+});
+ChannelDownlink.prototype.close = function () {
+  this.channel.unregisterDownlink(this);
+};
+
+
+function ChannelLinkedDownlink(channel, hostUri, nodeUri, laneUri, options) {
+  ChannelDownlink.call(this, channel, hostUri, nodeUri, laneUri, options);
+}
+ChannelLinkedDownlink.prototype = Object.create(ChannelDownlink.prototype);
+ChannelLinkedDownlink.prototype.constructor = ChannelLinkedDownlink;
+Object.defineProperty(ChannelLinkedDownlink.prototype, 'onChannelConnect', {
+  value: function () {
+    ChannelDownlink.prototype.onChannelConnect.call(this);
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var request = new proto.LinkRequest(nodeUri, this.laneUri, this.prio);
+    this.onLinkRequest(request);
+    this.channel.push(request);
+  },
+  configurable: true
+});
+
+
+function ChannelSyncedDownlink(channel, hostUri, nodeUri, laneUri, options) {
+  ChannelDownlink.call(this, channel, hostUri, nodeUri, laneUri, options);
+}
+ChannelSyncedDownlink.prototype = Object.create(ChannelDownlink.prototype);
+ChannelSyncedDownlink.prototype.constructor = ChannelSyncedDownlink;
+Object.defineProperty(ChannelSyncedDownlink.prototype, 'onChannelConnect', {
+  value: function () {
+    ChannelDownlink.prototype.onChannelConnect.call(this);
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var request = new proto.SyncRequest(nodeUri, this.laneUri, this.prio);
+    this.onSyncRequest(request);
+    this.channel.push(request);
+  },
+  configurable: true
+});
+
+
+function UriCache(baseUri, size) {
+  size = size || 32;
+  Object.defineProperty(this, 'baseUri', {value: baseUri, enumerable: true});
+  Object.defineProperty(this, 'base', {value: recon.uri.parse(baseUri)});
+  Object.defineProperty(this, 'size', {value: size, enumerable: true});
+  Object.defineProperty(this, 'resolveCache', {value: new Array(size)});
+  Object.defineProperty(this, 'unresolveCache', {value: new Array(size)});
+}
+UriCache.prototype.resolve = function (unresolvedUri) {
+  var hashBucket = Math.abs(UriCache.hash(unresolvedUri) % this.size);
+  var cacheEntry = this.resolveCache[hashBucket];
+  if (cacheEntry && cacheEntry.unresolved === unresolvedUri) {
+    return cacheEntry.resolved;
+  } else {
+    var resolvedUri = recon.uri.stringify(recon.uri.resolve(this.base, unresolvedUri));
+    this.resolveCache[hashBucket] = {
+      unresolved: unresolvedUri,
+      resolved: resolvedUri
+    };
+    return resolvedUri;
+  }
+};
+UriCache.prototype.unresolve = function (resolvedUri) {
+  var hashBucket = Math.abs(UriCache.hash(resolvedUri) % this.size);
+  var cacheEntry = this.unresolveCache[hashBucket];
+  if (cacheEntry && cacheEntry.resolved === resolvedUri) {
+    return cacheEntry.unresolved;
+  } else {
+    var unresolvedUri = recon.uri.stringify(recon.uri.unresolve(this.base, resolvedUri));
+    this.unresolveCache[hashBucket] = {
+      unresolved: unresolvedUri,
+      resolved: resolvedUri
+    };
+    return unresolvedUri;
+  }
+};
+UriCache.rotl = function (value, distance) {
+  return (value << distance) | (value >>> (32 - distance));
+};
+UriCache.mix = function (code, value) {
+  // MurmurHash3 mix function
+  value *= 0xcc9e2d51;
+  value = UriCache.rotl(value, 15);
+  value *= 0x1b873593;
+  code ^= value;
+  code = UriCache.rotl(code, 13);
+  code = code * 5 + 0xe6546b64;
+  return code;
+};
+UriCache.mash = function (code) {
+  // MurmurHash3 finalize function
+  code ^= code >>> 16;
+  code *= 0x85ebca6b;
+  code ^= code >>> 13;
+  code *= 0xc2b2ae35;
+  code ^= code >>> 16;
+  return code;
+};
+UriCache.hash = function (string) {
+  var code = 0;
+  for (var i = 0, n = string.length; i < n; i += 1) {
+    code = UriCache.mix(code, string.charAt(i));
+  }
+  code = UriCache.mash(code);
+  return code;
+};
+
+
+var swim = new Client();
+swim.client = function (options) {
+  return new Client(options);
+};
+swim.config = config;
+
+module.exports = swim;
