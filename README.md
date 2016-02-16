@@ -1,5 +1,7 @@
 # Swim Client Javascript Implementation
 
+[![Build Status](https://travis-ci.org/swimit/swim-client-js.svg?branch=master)](https://travis-ci.org/swimit/swim-client-js) [![Coverage Status](https://coveralls.io/repos/swimit/swim-client-js/badge.svg?branch=master)](https://coveralls.io/r/swimit/swim-client-js?branch=master)
+
 ## JavaScript Library
 
 The Swim client library can run in any standard JavaScript environment.
@@ -76,6 +78,19 @@ lane, and will continue receiving additional events as they're published.
 - `options.keepAlive`: whether or not to automatically re-establish and
   re-synchronize the link after connection failures.  Defaults to `false`.
 
+#### client.syncList([hostUri, ]nodeUri, laneUri[, options])
+
+Returns a [ListDownlink](#listdownlink) that synchronizes its state with a
+remote ordered list lane.
+
+- `options.prio`: the desired priority of events on the link.  A priority is
+  a floating point ranging value between `-1.0` and `1.0`, with `-1.0` being
+  the lowest priority, `1.0` being the highest priority, and `0.0` being the
+  default priority.  Events with higher priority are sent to the client before
+  events with lower priority.
+- `options.keepAlive`: whether or not to automatically re-establish and
+  re-synchronize the link after connection failures.  Defaults to `false`.
+
 #### client.syncMap([hostUri, ]nodeUri, laneUri[, options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a remote
@@ -141,6 +156,13 @@ Returns a synchronized [Downlink](#downlink) to a lane of a node on the remote
 host to which this scope is bound.  Registers the returned downlink with the
 scope to ensure that the link is cleaned up when the scope closes.
 
+#### host.syncList(nodeUri, laneUri[, options])
+
+Returns a [ListDownlink](#listdownlink) that synchronizes its state with an
+ordered list lane of a node on the remote host to which this scope is bound.
+Registers the returned downlink with the scope to ensure that the link is
+cleaned up when the scope closes.
+
 #### host.syncMap(nodeUri, laneUri[, options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a map
@@ -189,6 +211,13 @@ Returns a synchronized [Downlink](#downlink) to a lane of the remote node to
 which this scope is bound.  Registers the returned downlink with the scope to
 ensure that the link is cleaned up when the scope closes.
 
+#### node.syncList(laneUri[, options])
+
+Returns a [ListDownlink](#listdownlink) that synchronizes its state with an
+ordered list lane of the remote node to which this scope is bound.  Registers
+the returned downlink with the scope to ensure that the link is cleaned up
+when the scope closes.
+
 #### node.syncMap(laneUri[, options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a map
@@ -235,6 +264,13 @@ is cleaned up when the scope closes.
 Returns a synchronized [Downlink](#downlink) to the remote lane to which this
 scope is bound.  Registers the returned downlink with the scope to ensure that
 the link is cleaned up when the scope closes.
+
+#### node.syncList([options])
+
+Returns a [ListDownlink](#listdownlink) that synchronizes its state with the
+remote ordered list lane to which this scope is bound.  Registers the returned
+downlink with the scope to ensure that the link is cleaned up when the scope
+closes.
 
 #### node.syncMap([options])
 
@@ -397,18 +433,93 @@ will not be reconnected.  This happens when the client calls `downlink.close()`,
 or when the link is explicityly `@unlinked` by the remote host, or when the
 network connection that carries a non-`keepAlive` link gets disconnected.
 
+### ListDownlink
+
+A `ListDownlink` synchronizes its state with a remote ordered `ListLane`.  A
+`ListDownlink` supports the full functionality of an ordinary [Downlink](#downlink).
+It also implements array-like methods.  All list operations are transparently
+synchronized with the remote lane.  And all operations on the remote lane are
+transparently synchronized with the `ListDownlink` object.
+
+Note that the complete state of the list is not gauranteed to be available
+until the `onSynced` callback has been invoked.  And the downlinked list state
+may desync when the link's underlying network connection drops.
+
+#### listDownlink.length
+
+Returns the number of values in the downlinked list state.
+
+#### listDownlink.get(index)
+
+Returns the value at `index` in the downlinked list state.
+
+#### listDownlink.set(index, value)
+
+Sets `value` at `index` of the downlinked list state, and pushes the change to
+the remote lane.
+
+#### listDownlink.push(value1, ..., valueN)
+
+Appends one or more values to the end of the downlinked list state, and pushes
+the changes to the remote lane.  Returns the new length of the list.
+
+#### listDownlink.pop()
+
+Removes and returns the last value of the downlinked list state, pushing any
+change to the remote lane.  Returns `undefined` if the list is empty.
+
+#### listDownlink.unshift(value1, ..., valueN)
+
+Prepends one or more values to the beginning of the downlinked list state, and
+pushes the changes to the remote lane.  Returns the new length of the list.
+
+#### listDownlink.shift()
+
+Removes and returns the first value of the downlinked list state, pushing any
+change to the remote lane.  Returns `undefined` if the list is empty.
+
+#### listDownlink.move(fromIndex, toIndex)
+
+Moves that value at index `fromIndex` to index `toIndex`, pushing the change
+to the remote lane.
+
+#### listDownlink.splice(start, deleteCount[, value1, ..., valueN])
+
+Removes `deleteCount` elements from the downlinked list state, starting index
+`start`, and inserts zero or more new values at index `start`.  Pushes all
+changes to the remote lane.
+
+#### listDownlink.clear()
+
+Removes all values from the downlinked list state, as well as the remote list lane.
+Returns `this`.
+
+#### listDownlink.forEach(callback[, thisArg])
+
+Invokes `callback` for every value in the downlinked list state.  If provided,
+`thisArg` will be passed to each invocation of `callback` for use as its `this` value.
+
+`callback` is invoked with two arguments:
+- the current list value
+- index of the current list value
+- the `listDownlink` being traversed
+
+#### listDownlink.state
+
+Returns the internal downlinked list state as an array.
+
 ### MapDownlink
 
 A `MapDownlink` synchronizes its state with a remote `MapLane`.  A `MapDownlink`
 supports the full functionality of an ordinary [Downlink](#downlink).  It also
 implements the behavior of a JavaScript key-value `Map`.  All map operations
-are transparently synchronized with the remote lane.  And all commands on the
-remote lane are transparently syncrhonized with the `MapDownlink` map.
+are transparently synchronized with the remote lane.  And all operations on
+the remote lane are transparently syncrhonized with the `MapDownlink` object.
 `MapDownlink` seamlessly supports complex key objects.
 
 Note that the complete state of the map is not guaranteed to be available until
 the `onSynced` callback has been invoked.  And the downlinked map state may
-desync when the link's underlying network connection disconnects.
+desync when the link's underlying network connection drops.
 
 #### mapDownlink.size
 
@@ -435,7 +546,7 @@ returns `false`.
 
 #### mapDownlink.clear()
 
-Removes all entries from the downlinked map state and the remote map lane.
+Removes all entries from the downlinked map state, as well as the remote map lane.
 Returns `this`.
 
 #### mapDownlink.keys()
@@ -452,7 +563,7 @@ Invokes `callback` for every value in the downlinked map state.  If provided,
 `thisArg` will be passed to each invocation of `callback` for use as its `this` value.
 
 `callback` is invoked with two arguments:
-- the message value
+- the map value
 - the `mapDownlink` being traversed
 
 #### mapDownlink.primaryKey

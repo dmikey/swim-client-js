@@ -937,6 +937,512 @@ describe('LaneScope', function () {
 });
 
 
+describe('ListDownlink', function () {
+  initSuite(this);
+
+  it('should create a synchronized list link through a client scope', function () {
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/users');
+    assert.same(downlink.length, 0);
+    assert.same(downlink.state, []);
+    downlink = test.client.syncList(test.resolve('chat/public'), 'chat/users');
+    assert.same(downlink.length, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should create a synchronized list link through a host scope', function () {
+    var host = test.client.host(test.hostUri);
+    var downlink = host.syncList('chat/public', 'chat/users');
+    assert.same(downlink.length, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should create a synchronized list link through a node scope', function () {
+    var node = test.client.node(test.hostUri, 'chat/public');
+    var downlink = node.syncList('chat/users');
+    assert.same(downlink.length, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should create a synchronized list link through a lane scope', function () {
+    var lane = test.client.lane(test.hostUri, 'chat/public', 'chat/users');
+    var downlink = lane.syncList();
+    assert.same(downlink.length, 0);
+    assert.same(downlink.state, []);
+  });
+
+  it('should sync a list lane', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    downlink.onSynced = function (response) {
+      assert.same(downlink.length, 2);
+      assert.same(downlink.get(0), [{subject: 'foo'}]);
+      assert.same(downlink.get(1), [{subject: 'bar'}]);
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+      done();
+    };
+  });
+
+  it('should update a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+      downlink.set(1, [{subject: 'baz'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@update': [{index: 1}]}, {subject: 'baz'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 2);
+        assert.same(downlink.get(1), [{subject: 'baz'}]);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should push a value onto a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane,
+          recon.concat([{'@insert': [{index: 2}]}], message.body)));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+      downlink.push([{subject: 'baz'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{subject: 'baz'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 3);
+        assert.same(downlink.get(2), [{subject: 'baz'}]);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should pop a value off of a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+      var value = downlink.pop();
+      assert.same(value, [{subject: 'bar'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@remove': [{index: 1}]}, {subject: 'bar'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 1);
+        assert.same(downlink.state, [[{subject: 'foo'}]]);
+        downlink.forEach(function (value, index) {
+          assert.same(value, [{subject: 'foo'}]);
+          assert.equal(index, 0);
+        });
+        done();
+      }
+    };
+  });
+
+  it('should unshift a value onto a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+      downlink.unshift([{subject: 'baz'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@insert': [{index: 0}]}, {subject: 'baz'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 3);
+        assert.same(downlink.get(0), [{subject: 'baz'}]);
+        assert.same(downlink.state, [[{subject: 'baz'}], [{subject: 'foo'}], [{subject: 'bar'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should shift a value off of a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+      var value = downlink.shift();
+      assert.same(value, [{subject: 'foo'}]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@remove': [{index: 0}]}, {subject: 'foo'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 1);
+        assert.same(downlink.state, [[{subject: 'bar'}]]);
+        downlink.forEach(function (value, index) {
+          assert.same(value, [{subject: 'bar'}]);
+          assert.equal(index, 0);
+        });
+        done();
+      }
+    };
+  });
+
+  it('should remove a value from a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'baz'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+      var removed = downlink.splice(1, 1);
+      assert.same(removed, [[{subject: 'bar'}]]);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@remove': [{index: 1}]}, {subject: 'bar'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 2);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should move a value in a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'baz'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+      downlink.move(2, 1);
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@move': [{from: 2}, {to: 1}]}, {subject: 'baz'}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(downlink.length, 3);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}], [{subject: 'bar'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should splice a new value into a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'bar'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'baz'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+      var removed = downlink.splice(1, 1, [{subject: 'zap'}]);
+      assert.same(removed, [[{subject: 'bar'}]]);
+    };
+    downlink.onCommand = function (message) {
+      if (state === 1) {
+        state = 2;
+        assert.same(message.body, [{'@remove': [{index: 1}]}, {subject: 'bar'}]);
+      } else if (state === 2) {
+        state = 3;
+        assert.same(message.body, [{'@insert': [{index: 1}]}, {subject: 'zap'}]);
+      }
+    };
+    downlink.onEvent = function (message) {
+      if (state === 3) {
+        state = 4;
+        assert.same(downlink.length, 3);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'zap'}], [{subject: 'baz'}]]);
+      } else if (state === 4) {
+        assert.same(downlink.length, 3);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'zap'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should clear a synchronized list link', function (done) {
+    test.receive = function (message) {
+      if (message.isSyncRequest) {
+        test.send(new proto.LinkedResponse(message.node, message.lane));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{subject: 'baz'}]));
+        test.send(new proto.SyncedResponse(message.node, message.lane));
+      } else if (message.isCommandMessage) {
+        test.send(new proto.EventMessage(message.node, message.lane, message.body));
+      }
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/users');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+      downlink.clear();
+    };
+    downlink.onCommand = function (message) {
+      assert.equal(state, 1);
+      state = 2;
+      assert.same(message.body, [{'@clear': null}]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 2) {
+        assert.same(message.body, [{'@clear': null}]);
+        assert.equal(downlink.length, 0);
+        assert.same(downlink.state, []);
+        done();
+      }
+    };
+  });
+
+  it('should remotely update synchronized list link values', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{'@update': [{index: 1}]}, {subject: 'baz'}]));
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/users');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should remotely insert synchronized list link values', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'baz'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{'@insert': [{index: 1}]}, {subject: 'bar'}]));
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/users');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should remotely remove synchronized list link values', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'baz'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{'@remove': [{index: 1}]}, {subject: 'bar'}]));
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/users');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should remotely move a value in a synchronized list link', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'baz'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{'@move': [{from: 2}, {to: 1}]}, {subject: 'baz'}]));
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/room');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'bar'}], [{subject: 'baz'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert.same(downlink.length, 3);
+        assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}], [{subject: 'bar'}]]);
+        done();
+      }
+    };
+  });
+
+  it('should remotely clear synchronized list link values', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{subject: 'baz'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@clear': null}]));
+    };
+    var downlink = test.client.syncList(test.hostUri, 'chat/public', 'chat/users');
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{subject: 'foo'}], [{subject: 'baz'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert.equal(downlink.length, 0);
+        assert.same(downlink.state, []);
+        done();
+      }
+    };
+  });
+});
+
+
 describe('MapDownlink', function () {
   initSuite(this);
 
@@ -1284,35 +1790,6 @@ describe('MapDownlink', function () {
     };
   });
 
-  it('should remotely remove synchronized map link values', function (done) {
-    test.receive = function (request) {
-      assert(request.isSyncRequest);
-      test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
-      test.send(new proto.SyncedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane,
-        [{'@remove': null}, {id: 'a'}, {name: 'foo'}]));
-    };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
-    var state = 0;
-    downlink.onSynced = function (response) {
-      assert.equal(state, 0);
-      state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
-    };
-    downlink.onEvent = function (message) {
-      if (state === 1) {
-        assert(!downlink.has('a'));
-        assert.same(downlink.get('a'), undefined);
-        assert(!downlink.delete('a'));
-        done();
-      }
-    };
-  });
-
   it('should clear a synchronized map link', function (done) {
     test.receive = function (message) {
       if (message.isSyncRequest) {
@@ -1346,6 +1823,35 @@ describe('MapDownlink', function () {
         assert.same(downlink.state, []);
         assert(!downlink.has('a'));
         assert(!downlink.has('b'));
+        done();
+      }
+    };
+  });
+
+  it('should remotely remove synchronized map link values', function (done) {
+    test.receive = function (request) {
+      assert(request.isSyncRequest);
+      test.send(new proto.LinkedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.SyncedResponse(request.node, request.lane));
+      test.send(new proto.EventMessage(request.node, request.lane,
+        [{'@remove': null}, {id: 'a'}, {name: 'foo'}]));
+    };
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
+      primaryKey: 'id'
+    });
+    var state = 0;
+    downlink.onSynced = function (response) {
+      assert.equal(state, 0);
+      state = 1;
+      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+    };
+    downlink.onEvent = function (message) {
+      if (state === 1) {
+        assert(!downlink.has('a'));
+        assert.same(downlink.get('a'), undefined);
+        assert(!downlink.delete('a'));
         done();
       }
     };

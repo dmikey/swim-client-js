@@ -56,6 +56,9 @@ Client.prototype.link = function () {
 Client.prototype.sync = function () {
   return this.callChannelWithLinkArgs('sync', arguments);
 };
+Client.prototype.syncList = function () {
+  return this.callChannelWithLinkArgs('syncList', arguments);
+};
 Client.prototype.syncMap = function () {
   return this.callChannelWithLinkArgs('syncMap', arguments);
 };
@@ -178,9 +181,13 @@ HostScope.prototype.sync = function (nodeUri, laneUri, options) {
   this.registerDownlink(downlink);
   return downlink;
 };
-HostScope.prototype.syncMap = function () {
-  arguments[0] = Client.resolveNodeUri(this.hostUri, arguments[0]);
-  var downlink = this.channel.syncMap.apply(this.channel, arguments);
+HostScope.prototype.syncList = function (nodeUri, laneUri, options) {
+  var downlink = this.channel.syncList(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+HostScope.prototype.syncMap = function (nodeUri, laneUri, options) {
+  var downlink = this.channel.syncMap(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
   this.registerDownlink(downlink);
   return downlink;
 };
@@ -214,10 +221,13 @@ NodeScope.prototype.sync = function (laneUri, options) {
   this.registerDownlink(downlink);
   return downlink;
 };
-NodeScope.prototype.syncMap = function () {
-  var args = [this.nodeUri];
-  Array.prototype.push.apply(args, arguments);
-  var downlink = this.channel.syncMap.apply(this.channel, args);
+NodeScope.prototype.syncList = function (laneUri, options) {
+  var downlink = this.channel.syncList(this.nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+NodeScope.prototype.syncMap = function (laneUri, options) {
+  var downlink = this.channel.syncMap(this.nodeUri, laneUri, options);
   this.registerDownlink(downlink);
   return downlink;
 };
@@ -249,10 +259,13 @@ LaneScope.prototype.sync = function (options) {
   this.registerDownlink(downlink);
   return downlink;
 };
-LaneScope.prototype.syncMap = function () {
-  var args = [this.nodeUri, this.laneUri];
-  Array.prototype.push.apply(args, arguments);
-  var downlink = this.channel.syncMap.apply(this.channel, args);
+LaneScope.prototype.syncList = function (options) {
+  var downlink = this.channel.syncList(this.nodeUri, this.laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+LaneScope.prototype.syncMap = function (options) {
+  var downlink = this.channel.syncMap(this.nodeUri, this.laneUri, options);
   this.registerDownlink(downlink);
   return downlink;
 };
@@ -305,6 +318,11 @@ Channel.prototype.link = function (nodeUri, laneUri, options) {
 };
 Channel.prototype.sync = function (nodeUri, laneUri, options) {
   var downlink = new SyncedDownlink(this, this.hostUri, nodeUri, laneUri, options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+Channel.prototype.syncList = function (nodeUri, laneUri, options) {
+  var downlink = new ListDownlink(this, this.hostUri, nodeUri, laneUri, options);
   this.registerDownlink(downlink);
   return downlink;
 };
@@ -774,6 +792,209 @@ Object.defineProperty(SyncedDownlink.prototype, 'onChannelConnect', {
 });
 
 
+function ListDownlink(channel, hostUri, nodeUri, laneUri, options) {
+  SyncedDownlink.call(this, channel, hostUri, nodeUri, laneUri, options);
+  Object.defineProperty(this, 'state', {value: [], configurable: true});
+}
+ListDownlink.prototype = Object.create(SyncedDownlink.prototype);
+ListDownlink.prototype.constructor = ListDownlink;
+Object.defineProperty(ListDownlink.prototype, 'onEventMessage', {
+  value: function (message) {
+    var tag = recon.tag(message.body);
+    var head, index, value;
+    if (tag === '@update') {
+      head = recon.head(message.body);
+      index = recon.get(head, 'index');
+      value = recon.tail(message.body);
+      this.remoteUpdate(index, value);
+    } else if (tag === '@insert') {
+      head = recon.head(message.body);
+      index = recon.get(head, 'index');
+      value = recon.tail(message.body);
+      this.remoteInsert(index, value);
+    } else if (tag === '@move') {
+      head = recon.head(message.body);
+      var from = recon.get(head, 'from');
+      var to = recon.get(head, 'to');
+      value = recon.tail(message.body);
+      this.remoteMove(from, to, value);
+    } else if (tag === '@remove' || tag === '@delete') {
+      head = recon.head(message.body);
+      index = recon.get(head, 'index');
+      value = recon.tail(message.body);
+      this.remoteRemove(index, value);
+    } else if (tag === '@clear' && recon.size(message.body) === 1) {
+      this.remoteClear();
+    } else {
+      this.remoteAppend(message.body);
+    }
+    SyncedDownlink.prototype.onEventMessage.call(this, message);
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'remoteAppend', {
+  value: function (value) {
+    this.state.push(value);
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'remoteUpdate', {
+  value: function (index, value) {
+    this.state[index] = value;
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'remoteInsert', {
+  value: function (index, value) {
+    if (!recon.equal(this.state[index], value)) {
+      this.state.splice(index, 0, value);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'remoteMove', {
+  value: function (fromIndex, toIndex, value) {
+    if (!recon.equal(this.state[toIndex], value)) {
+      this.state.splice(fromIndex, 1);
+      this.state.splice(toIndex, 0, value);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'remoteRemove', {
+  value: function (index, value) {
+    if (recon.equal(this.state[index], value)) {
+      this.state.splice(index, 1);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'remoteClear', {
+  value: function (index, value) {
+    Object.defineProperty(this, 'state', {value: [], configurable: true});
+  },
+  configurable: true
+});
+Object.defineProperty(ListDownlink.prototype, 'length', {
+  get: function () {
+    return this.state.length;
+  },
+  configurable: true,
+  enumerable: true
+});
+ListDownlink.prototype.get = function (index) {
+  return this.state[index];
+};
+ListDownlink.prototype.set = function (index, value) {
+  this.state[index] = value;
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  var body = recon.concat(recon({'@update': recon({index: index})}), value);
+  var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+  this.onCommandMessage(message);
+  this.channel.push(message);
+};
+ListDownlink.prototype.push = function () {
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  for (var i = 0, n = arguments.length; i < n; i += 1) {
+    var value = arguments[i];
+    this.state.push(value);
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, value);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
+  return this.state.length;
+};
+ListDownlink.prototype.pop = function () {
+  var value = this.state.pop();
+  var index = this.state.length;
+  if (value !== undefined) {
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var body = recon.concat(recon({'@remove': recon({index: index})}), value);
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
+  return value;
+};
+ListDownlink.prototype.unshift = function () {
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  for (var i = arguments.length - 1; i >= 0; i -= 1) {
+    var value = arguments[i];
+    this.state.unshift(value);
+    var body = recon.concat(recon({'@insert': recon({index: 0})}), value);
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
+  return this.state.length;
+};
+ListDownlink.prototype.shift = function () {
+  var value = this.state.shift();
+  if (value !== undefined) {
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var body = recon.concat(recon({'@remove': recon({index: 0})}), value);
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
+  return value;
+};
+ListDownlink.prototype.move = function (fromIndex, toIndex) {
+  var removed = this.state.splice(fromIndex, 1);
+  if (removed.length === 1) {
+    var value = removed[0];
+    this.state.splice(toIndex, 0, value);
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var body = recon.concat(recon({'@move': recon({from: fromIndex, to: toIndex})}), value);
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
+};
+ListDownlink.prototype.splice = function () {
+  var start = arguments[0];
+  var deleteCount = arguments[1];
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  var removed = [];
+  var i, n, value, body, message;
+  for (i = start; i < start + deleteCount; i += 1) {
+    value = this.state[i];
+    if (value !== undefined) {
+      removed.push(value);
+      this.state.splice(start, 1);
+      body = recon.concat(recon({'@remove': recon({index: start})}), value);
+      message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+      this.onCommandMessage(message);
+      this.channel.push(message);
+    }
+  }
+  for (i = 2, n = arguments.length; i < n; i += 1) {
+    var index = start + i - 2;
+    value = arguments[i];
+    this.state.splice(index, 0, value);
+    body = recon.concat(recon({'@insert': recon({index: index})}), value);
+    message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
+  return removed;
+};
+ListDownlink.prototype.clear = function () {
+  Object.defineProperty(this, 'state', {value: [], configurable: true});
+  var nodeUri = this.channel.unresolve(this.nodeUri);
+  var message = new proto.CommandMessage(nodeUri, this.laneUri, [{'@clear': null}]);
+  this.onCommandMessage(message);
+  this.channel.push(message);
+  return this;
+};
+ListDownlink.prototype.forEach = function (callback, thisArg) {
+  for (var i = 0, n = this.state.length; i < n; i += 1) {
+    var value = this.state[i];
+    callback.call(thisArg, value, i, this);
+  }
+};
+
+
 function MapDownlink(channel, hostUri, nodeUri, laneUri, options) {
   SyncedDownlink.call(this, channel, hostUri, nodeUri, laneUri, options);
   Object.defineProperty(this, 'state', {value: [], configurable: true});
@@ -787,7 +1008,7 @@ Object.defineProperty(MapDownlink.prototype, 'onEventMessage', {
   value: function (message) {
     var key;
     var tag = recon.tag(message.body);
-    if (tag === '@remove') {
+    if (tag === '@remove' || tag === '@delete') {
       var body = recon.tail(message.body);
       key = this.primaryKey(body);
       if (key !== undefined) {
@@ -914,7 +1135,7 @@ MapDownlink.prototype.delete = function (key) {
     if (recon.equal(key, id)) {
       this.state.splice(i, 1);
       var nodeUri = this.channel.unresolve(this.nodeUri);
-      var body = recon.concat({'@remove': null}, value);
+      var body = recon.concat(recon({'@remove': null}), value);
       var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
       this.onCommandMessage(message);
       this.channel.push(message);
