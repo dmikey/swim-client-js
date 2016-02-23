@@ -50,6 +50,9 @@ Client.prototype.getOrCreateChannel = function (hostUri) {
   }
   return channel;
 };
+Client.prototype.downlink = function () {
+  return new DownlinkBuilder(null, this);
+};
 Client.prototype.link = function () {
   return this.callChannelWithLinkArgs('link', arguments);
 };
@@ -171,6 +174,9 @@ function HostScope(channel, hostUri) {
 }
 HostScope.prototype = Object.create(Scope.prototype);
 HostScope.prototype.constructor = HostScope;
+HostScope.prototype.downlink = function () {
+  return new DownlinkBuilder(this.channel, this).host(this.hostUri);
+};
 HostScope.prototype.link = function (nodeUri, laneUri, options) {
   var downlink = this.channel.link(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
   this.registerDownlink(downlink);
@@ -211,6 +217,9 @@ function NodeScope(channel, hostUri, nodeUri) {
 }
 NodeScope.prototype = Object.create(Scope.prototype);
 NodeScope.prototype.constructor = NodeScope;
+NodeScope.prototype.downlink = function () {
+  return new DownlinkBuilder(this.channel, this).host(this.hostUri).node(this.nodeUri);
+};
 NodeScope.prototype.link = function (laneUri, options) {
   var downlink = this.channel.link(this.nodeUri, laneUri, options);
   this.registerDownlink(downlink);
@@ -249,6 +258,9 @@ function LaneScope(channel, hostUri, nodeUri, laneUri) {
 }
 LaneScope.prototype = Object.create(Scope.prototype);
 LaneScope.prototype.constructor = LaneScope;
+LaneScope.prototype.downlink = function () {
+  return new DownlinkBuilder(this.channel, this).host(this.hostUri).node(this.nodeUri).lane(this.laneUri);
+};
 LaneScope.prototype.link = function (options) {
   var downlink = this.channel.link(this.nodeUri, this.laneUri, options);
   this.registerDownlink(downlink);
@@ -625,6 +637,148 @@ Channel.prototype.onWebSocketClose = function () {
 };
 
 
+function DownlinkBuilder(channel, scope) {
+  Object.defineProperty(this, 'channel', {value: channel, configurable: true});
+  Object.defineProperty(this, 'scope', {value: scope, configurable: true});
+  Object.defineProperty(this, 'proxy', {value: {}, configurable: true});
+  this.options = {};
+}
+DownlinkBuilder.prototype.host = function (hostUri) {
+  this.hostUri = hostUri;
+  return this;
+};
+DownlinkBuilder.prototype.node = function (nodeUri) {
+  this.nodeUri = nodeUri;
+  return this;
+};
+DownlinkBuilder.prototype.lane = function (laneUri) {
+  this.laneUri = laneUri;
+  return this;
+};
+DownlinkBuilder.prototype.prio = function (prio) {
+  this.options.prio = prio;
+  return this;
+};
+DownlinkBuilder.prototype.keepAlive = function () {
+  this.options.keepAlive = true;
+  return this;
+};
+DownlinkBuilder.prototype.delegate = function (delegate) {
+  this.options.delegate = delegate;
+  return this;
+};
+DownlinkBuilder.prototype.onEvent = function (callback) {
+  this.proxy.onEvent = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onCommand = function (callback) {
+  this.proxy.onCommand = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onLink = function (callback) {
+  this.proxy.onLink = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onLinked = function (callback) {
+  this.proxy.onLinked = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onSync = function (callback) {
+  this.proxy.onSync = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onSynced = function (callback) {
+  this.proxy.onSynced = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onUnlink = function (callback) {
+  this.proxy.onUnlink = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onUnlinked = function (callback) {
+  this.proxy.onUnlinked = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onConnect = function (callback) {
+  this.proxy.onConnect = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onDisconnect = function (callback) {
+  this.proxy.onDisconnect = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onError = function (callback) {
+  this.proxy.onError = callback;
+  return this;
+};
+DownlinkBuilder.prototype.onClose = function (callback) {
+  this.proxy.onClose = callback;
+  return this;
+};
+DownlinkBuilder.prototype.primaryKey = function (primaryKey) {
+  this.options.primaryKey = primaryKey;
+  return this;
+};
+DownlinkBuilder.prototype.sortBy = function (sortBy) {
+  this.options.sortBy = sortBy;
+  return this;
+};
+Object.defineProperty(DownlinkBuilder.prototype, 'normalize', {
+  value: function () {
+    if (this.hostUri) {
+      this.nodeUri = Client.resolveNodeUri(this.hostUri, this.nodeUri);
+    } else {
+      this.hostUri = Client.extractHostUri(this.nodeUri);
+    }
+    if (!this.channel) {
+      // If channel is null then scope references a Client.
+      Object.defineProperty(this, 'channel', {
+        value: this.scope.getOrCreateChannel(this.hostUri),
+        configurable: true
+      });
+      Object.defineProperty(this, 'scope', {value: null, configurable: true});
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(DownlinkBuilder.prototype, 'registerDownlink', {
+  value: function (downlink) {
+    for (var key in this.proxy) {
+      downlink[key] = this.proxy[key];
+    }
+    this.channel.registerDownlink(downlink);
+    if (this.scope) {
+      this.scope.registerDownlink(downlink);
+    }
+  },
+  configure: true
+});
+DownlinkBuilder.prototype.link = function () {
+  this.normalize();
+  var downlink = new LinkedDownlink(this.channel, this.hostUri, this.nodeUri, this.laneUri, this.options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+DownlinkBuilder.prototype.sync = function () {
+  this.normalize();
+  var downlink = new SyncedDownlink(this.channel, this.hostUri, this.nodeUri, this.laneUri, this.options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+DownlinkBuilder.prototype.syncList = function () {
+  this.normalize();
+  var downlink = new ListDownlink(this.channel, this.hostUri, this.nodeUri, this.laneUri, this.options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+DownlinkBuilder.prototype.syncMap = function () {
+  this.normalize();
+  var downlink = new MapDownlink(this.channel, this.hostUri, this.nodeUri, this.laneUri, this.options);
+  this.registerDownlink(downlink);
+  return downlink;
+};
+
+
 function Downlink(channel, hostUri, nodeUri, laneUri, options) {
   options = options || {};
   Object.defineProperty(this, 'channel', {value: channel});
@@ -632,7 +786,7 @@ function Downlink(channel, hostUri, nodeUri, laneUri, options) {
   Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
   Object.defineProperty(this, 'laneUri', {value: laneUri, enumerable: true});
   Object.defineProperty(this, 'options', {value: options, enumerable: true});
-  Object.defineProperty(this, 'delegate', {value: this, writable: true});
+  Object.defineProperty(this, 'delegate', {value: options.delegate || this, writable: true});
 }
 Object.defineProperty(Downlink.prototype, 'prio', {
   get: function () {

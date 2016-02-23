@@ -1,6 +1,6 @@
 {
   "name": "swim-client-js",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Swim Client JavaScript Implementation",
   "homepage": "https://github.com/swimit/swim-client-js",
   "author": "Chris Sachs <chris@swim.it>",
@@ -43,13 +43,13 @@
     "gulp-jshint": "^2.0.0",
     "gulp-mocha": "^2.2.0",
     "gulp-sourcemaps": "^1.6.0",
-    "gulp-uglify": "^1.5.2",
+    "gulp-uglify": "^1.5.3",
     "gulp-util": "^3.0.7",
     "jshint": "^2.9.1",
     "jshint-stylish": "^2.1.0",
     "vinyl-buffer": "^1.0.0",
     "vinyl-source-stream": "^1.1.0",
-    "yargs": "^3.32.0"
+    "yargs": "^4.1.0"
   },
   "repository": {
     "type": "git",

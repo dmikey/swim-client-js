@@ -47,6 +47,11 @@ var client = swim.client();
 
 ### Client
 
+#### client.downlink()
+
+Returns a new [DownlinkBuilder](#downlinkbuilder) for constructing a link to
+a lane of a remote node.
+
 #### client.link([hostUri, ]nodeUri, laneUri[, options])
 
 Returns a [Downlink](#downlink) to a lane of a remote node.  If provided,
@@ -99,7 +104,7 @@ map lane.
 - `options.primaryKey`: function that derives keys from message values, or a
   dot-notation string that specifies the path of the primary key.  Defaults to
   the identity function.
-- `options.sortyBy`: function with which to sort downlinked map state, or a
+- `options.sortBy`: function with which to sort downlinked map state, or a
   dot-notation string that specifies the path of a value to sort by.  Defaults
   to `undefined`, which leaves the downlinked map state unsorted.
 - `options.prio`: the desired priority of events on the link.  A priority is
@@ -143,6 +148,11 @@ the client connection pool.
 #### host.hostUri
 
 Returns the URI of the remote host to which the scope is bound.
+
+#### host.downlink()
+
+Returns a new [DownlinkBuilder](#downlinkbuilder) for constructing a link to
+a lane of a node on the remote host to which this scope is bound.
 
 #### host.link(nodeUri, laneUri[, options])
 
@@ -199,6 +209,11 @@ Returns the URI of the remote host to which the scope is bound.
 Returns the URI of the remote node to which the scope is bound.  Returns an
 absolute URI resolved against the `hostUri`.
 
+#### node.downlink()
+
+Returns a new [DownlinkBuilder](#downlinkbuilder) for constructing a link to
+a lane of the remote node to which this scope is bound.
+
 #### node.link(laneUri[, options])
 
 Returns a [Downlink](#downlink) to a lane of the remote node to which this
@@ -253,6 +268,11 @@ absolute URI resolved against the `hostUri`.
 
 Returns the URI of the lane to which the scope is bound.
 
+#### lane.downlink()
+
+Returns a new [DownlinkBuilder](#downlinkbuilder) for constructing a link to
+the remote lane to which this scope is bound.
+
 #### lane.link([options])
 
 Returns a [Downlink](#downlink) to the remote lane to which this scope is
@@ -265,14 +285,14 @@ Returns a synchronized [Downlink](#downlink) to the remote lane to which this
 scope is bound.  Registers the returned downlink with the scope to ensure that
 the link is cleaned up when the scope closes.
 
-#### node.syncList([options])
+#### lane.syncList([options])
 
 Returns a [ListDownlink](#listdownlink) that synchronizes its state with the
 remote ordered list lane to which this scope is bound.  Registers the returned
 downlink with the scope to ensure that the link is cleaned up when the scope
 closes.
 
-#### node.syncMap([options])
+#### lane.syncMap([options])
 
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with the
 remote map lane to which this scope is bound.  Registers the returned downlink
@@ -577,3 +597,106 @@ Returns the function used to sort the downlinked map state.
 #### mapDownlink.state
 
 Returns the internal downlinked map state as an array.
+
+### DownlinkBuilder
+
+#### builder.host(hostUri)
+
+Sets the host URI of the downlink to create and returns `this`.
+
+#### builder.node(nodeUri)
+
+Sets the node URI of the downlink to create and returns `this`.
+
+#### builder.lane(laneUri)
+
+Sets the lane URI of the downlink to create and returns `this`.
+
+#### builder.prio(priority)
+
+Sets the priority of the downlink to create and returns `this`.
+
+#### builder.keepAlive()
+
+Sets the keep-alive mode of the downlink to create to `true` and returns `this`.
+
+#### builder.delegate(delegate)
+
+Sets the event delegate object of the downlink to create and returns `this`.
+
+#### builder.onEvent(callback)
+
+Sets the `onEvent` callback of the downlink to create and returns `this`.
+
+#### builder.onCommand(callback)
+
+Sets the `onCommand` callback of the downlink to create and returns `this`.
+
+#### builder.onLink(callback)
+
+Sets the `onLink` callback of the downlink to create and returns `this`.
+
+#### builder.onLinked(callback)
+
+Sets the `onLinked` callback of the downlink to create and returns `this`.
+
+#### builder.onSync(callback)
+
+Sets the `onSync` callback of the downlink to create and returns `this`.
+
+#### builder.onSynced(callback)
+
+Sets the `onSynced` callback of the downlink to create and returns `this`.
+
+#### builder.onUnlink(callback)
+
+Sets the `onUnlink` callback of the downlink to create and returns `this`.
+
+#### builder.onUnlinked(callback)
+
+Sets the `onUnlinked` callback of the downlink to create and returns `this`.
+
+#### builder.onConnect(callback)
+
+Sets the `onConnect` callback of the downlink to create and returns `this`.
+
+#### builder.onDisconnect(callback)
+
+Sets the `onDisconnect` callback of the downlink to create and returns `this`.
+
+#### builder.onError(callback)
+
+Sets the `onError` callback of the downlink to create and returns `this`.
+
+#### builder.onClose(callback)
+
+Sets the `onClose` callback of the downlink to create and returns `this`.
+
+#### builder.primaryKey(function)
+
+Sets the `primaryKey` function option of the synchronized map downlink to
+create and returns `this`.
+
+#### builder.sortBy(function)
+
+Sets the `sortBy` function option of the synchronized map downlink to create
+and returns `this`.
+
+#### builder.link()
+
+Returns a [Downlink](#downlink) parameterized by the builder's configuration.
+
+#### builder.sync()
+
+Returns a synchronized [Downlink](#downlink) parameterized by the builder's
+configuration.
+
+#### builder.syncList()
+
+Returns a synchronized [ListDownlink](#listdownlink) parameterized by the
+builder's configuration.
+
+#### builder.syncMap()
+
+Returns a synchronized [MapDownlink](#listdownlink) parameterized by the
+builder's configuration.

@@ -89,6 +89,21 @@ function initSuite(suite) {
 describe('Client', function () {
   initSuite(this);
 
+  it('should build a downlink through a client scope', function () {
+    var downlink = test.client.downlink()
+      .host(test.hostUri)
+      .node('house/kitchen#light')
+      .lane('light/on')
+      .prio(0.5)
+      .keepAlive()
+      .link();
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(downlink.keepAlive);
+  });
+
   it('should create a link through a client scope', function () {
     var options = {prio: 0.5};
     var downlink = test.client.link(test.hostUri, 'house/kitchen#light', 'light/on', options);
@@ -343,6 +358,21 @@ describe('HostScope', function () {
     assert.equal(host.hostUri, test.hostUri);
   });
 
+  it('should build a downlink through a host scope', function () {
+    var host = test.client.host(test.hostUri);
+    var downlink = host.downlink()
+      .node('house/kitchen#light')
+      .lane('light/on')
+      .prio(0.5)
+      .keepAlive()
+      .link();
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(downlink.keepAlive);
+  });
+
   it('should link a lane through a host scope', function (done) {
     test.receive = function (request) {
       assert(request.isLinkRequest);
@@ -577,6 +607,20 @@ describe('NodeScope', function () {
     assert.equal(node1.hostUri, 'ws://example.com');
     var node2 = test.client.node('swims://example.com/');
     assert.equal(node2.hostUri, 'wss://example.com');
+  });
+
+  it('should build a downlink through a node scope', function () {
+    var node = test.client.node(test.hostUri, 'house/kitchen#light');
+    var downlink = node.downlink()
+      .lane('light/on')
+      .prio(0.5)
+      .keepAlive()
+      .link();
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(downlink.keepAlive);
   });
 
   it('should link a lane through a node scope', function (done) {
@@ -818,6 +862,19 @@ describe('LaneScope', function () {
     assert.equal(lane.hostUri, test.hostUri);
     assert.equal(lane.nodeUri, nodeUri);
     assert.equal(lane.laneUri, 'light/on');
+  });
+
+  it('should build a downlink through a lane scope', function () {
+    var lane = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
+    var downlink = lane.downlink()
+      .prio(0.5)
+      .keepAlive()
+      .link();
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(downlink.keepAlive);
   });
 
   it('should link a lane through a lane scope', function (done) {
@@ -1885,6 +1942,136 @@ describe('MapDownlink', function () {
         done();
       }
     };
+  });
+});
+
+
+describe('DownlinkBuilder', function () {
+  initSuite(this);
+
+  it('should build a minimally configured downlink', function () {
+    var downlink = test.client.downlink()
+      .node(test.resolve('house/kitchen#light'))
+      .lane('light/on')
+      .link();
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.0);
+    assert(!downlink.keepAlive);
+    assert.equal(downlink.delegate, downlink);
+    assert.equal(downlink.onEvent, undefined);
+    assert.equal(downlink.onCommand, undefined);
+    assert.equal(downlink.onLink, undefined);
+    assert.equal(downlink.onLinked, undefined);
+    assert.equal(downlink.onSync, undefined);
+    assert.equal(downlink.onSynced, undefined);
+    assert.equal(downlink.onUnlink, undefined);
+    assert.equal(downlink.onUnlinked, undefined);
+    assert.equal(downlink.onConnect, undefined);
+    assert.equal(downlink.onDisconnect, undefined);
+    assert.equal(downlink.onError, undefined);
+    assert.equal(downlink.onClose, undefined);
+  });
+
+  it('should build a downlink with event callbacks', function () {
+    function onEvent(message) {}
+    function onCommand(message) {}
+    function onLink(request) {}
+    function onLinked(response) {}
+    function onSync(request) {}
+    function onSynced(response) {}
+    function onUnlink(request) {}
+    function onUnlinked(response) {}
+    function onConnect() {}
+    function onDisconnect() {}
+    function onError() {}
+    function onClose() {}
+    var downlink = test.client.downlink()
+      .host(test.hostUri)
+      .node('house/kitchen#light')
+      .lane('light/on')
+      .prio(0.5)
+      .keepAlive()
+      .onEvent(onEvent)
+      .onCommand(onCommand)
+      .onLink(onLink)
+      .onLinked(onLinked)
+      .onSync(onSync)
+      .onSynced(onSynced)
+      .onUnlink(onUnlink)
+      .onUnlinked(onUnlinked)
+      .onConnect(onConnect)
+      .onDisconnect(onDisconnect)
+      .onError(onError)
+      .onClose(onClose)
+      .link();
+    assert.equal(downlink.hostUri, test.hostUri);
+    assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
+    assert.equal(downlink.laneUri, 'light/on');
+    assert.equal(downlink.prio, 0.5);
+    assert(downlink.keepAlive);
+    assert.equal(downlink.delegate, downlink);
+    assert.equal(downlink.onEvent, onEvent);
+    assert.equal(downlink.onCommand, onCommand);
+    assert.equal(downlink.onLink, onLink);
+    assert.equal(downlink.onLinked, onLinked);
+    assert.equal(downlink.onSync, onSync);
+    assert.equal(downlink.onSynced, onSynced);
+    assert.equal(downlink.onUnlink, onUnlink);
+    assert.equal(downlink.onUnlinked, onUnlinked);
+    assert.equal(downlink.onConnect, onConnect);
+    assert.equal(downlink.onDisconnect, onDisconnect);
+    assert.equal(downlink.onError, onError);
+    assert.equal(downlink.onClose, onClose);
+  });
+
+  it('should build a downlink with an event delegate', function () {
+    var delegate = {};
+    var downlink = test.client.downlink()
+      .node(test.resolve('house/kitchen#light'))
+      .lane('light/on')
+      .delegate(delegate)
+      .link();
+    assert.equal(downlink.delegate, delegate);
+  });
+
+  it('should build a linked downlink', function () {
+    var downlink = test.client.downlink()
+      .node(test.resolve('house/kitchen#light'))
+      .lane('light/on')
+      .link();
+    assert.equal(downlink.constructor.name, 'LinkedDownlink');
+  });
+
+  it('should build a synced downlink', function () {
+    var downlink = test.client.downlink()
+      .node(test.resolve('house/kitchen#light'))
+      .lane('light/on')
+      .sync();
+    assert.equal(downlink.constructor.name, 'SyncedDownlink');
+  });
+
+  it('should build a synchronized list downlink', function () {
+    var downlink = test.client.downlink()
+      .node(test.resolve('house/kitchen#light'))
+      .lane('light/on')
+      .syncList();
+    assert.equal(downlink.constructor.name, 'ListDownlink');
+  });
+
+  it('should build a synchronized map downlink', function () {
+    function primaryKey(value) {}
+    function sortBy(x, y) {}
+    var downlink = test.client.downlink()
+      .node(test.resolve('house/kitchen#light'))
+      .lane('light/on')
+      .primaryKey(primaryKey)
+      .sortBy(sortBy)
+      .syncMap();
+    assert.equal(downlink.constructor.name, 'MapDownlink');
+    assert.equal(downlink.primaryKey, primaryKey);
+    assert.equal(downlink.sortBy, sortBy);
   });
 });
 
