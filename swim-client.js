@@ -10,7 +10,48 @@ function Client(options) {
   options = options || {};
   Object.defineProperty(this, 'options', {value: options, enumerable: true});
   Object.defineProperty(this, 'channels', {value: {}, configurable: true});
+  Object.defineProperty(this, 'delegate', {value: this, enumerable: true, writable: true});
 }
+Object.defineProperty(Client.prototype, 'onChannelConnect', {
+  value: function (info) {
+    if (typeof this.delegate.onConnect === 'function') {
+      this.onConnect(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Client.prototype, 'onChannelDisconnect', {
+  value: function (info) {
+    if (typeof this.delegate.onDisconnect === 'function') {
+      this.onDisconnect(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Client.prototype, 'onChannelError', {
+  value: function (info) {
+    if (typeof this.delegate.onError === 'function') {
+      this.onError(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Client.prototype, 'onChannelAuthorize', {
+  value: function (info) {
+    if (typeof this.delegate.onAuthorize === 'function') {
+      this.onAuthorize(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Client.prototype, 'onChannelDeauthorize', {
+  value: function (info) {
+    if (typeof this.delegate.onDeauthorize === 'function') {
+      this.onDeauthorize(info);
+    }
+  },
+  configurable: true
+});
 Object.defineProperty(Client.prototype, 'callChannelWithLinkArgs', {
   value: function (name, args) {
     var hostUri, nodeUri, laneUri, options;
@@ -45,10 +86,14 @@ Object.defineProperty(Client.prototype, 'callChannelWithLinkArgs', {
 Client.prototype.getOrCreateChannel = function (hostUri) {
   var channel = this.channels[hostUri];
   if (channel === undefined) {
-    channel = new Channel(hostUri, this.options);
+    channel = new Channel(this, hostUri, this.options);
     this.channels[hostUri] = channel;
   }
   return channel;
+};
+Client.prototype.authorize = function (hostUri, credentials) {
+  var channel = this.getOrCreateChannel(hostUri);
+  channel.authorize(credentials);
 };
 Client.prototype.downlink = function () {
   return new DownlinkBuilder(null, this);
@@ -134,9 +179,70 @@ Client.resolveNodeUri = function (hostUri, nodeUri) {
 };
 
 
-function Scope() {
+function Scope(channel) {
+  Object.defineProperty(this, 'channel', {value: channel});
   Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
+  Object.defineProperty(this, 'delegate', {value: this, enumerable: true, writable: true});
+  channel.registerDelegate(this);
 }
+Object.defineProperty(Scope.prototype, 'isConnected', {
+  get: function () {
+    return this.channel.isConnected;
+  },
+  enumerable: true
+});
+Object.defineProperty(Scope.prototype, 'isAuthorized', {
+  get: function () {
+    return this.channel.isAuthorized;
+  },
+  enumerable: true
+});
+Object.defineProperty(Scope.prototype, 'session', {
+  get: function () {
+    return this.channel.session;
+  },
+  enumerable: true
+});
+Object.defineProperty(Scope.prototype, 'onChannelConnect', {
+  value: function (info) {
+    if (typeof this.delegate.onConnect === 'function') {
+      this.onConnect(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Scope.prototype, 'onChannelDisconnect', {
+  value: function (info) {
+    if (typeof this.delegate.onDisconnect === 'function') {
+      this.onDisconnect(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Scope.prototype, 'onChannelError', {
+  value: function (info) {
+    if (typeof this.delegate.onError === 'function') {
+      this.onError(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Scope.prototype, 'onChannelAuthorize', {
+  value: function (info) {
+    if (typeof this.delegate.onAuthorize === 'function') {
+      this.onAuthorize(info);
+    }
+  },
+  configurable: true
+});
+Object.defineProperty(Scope.prototype, 'onChannelDeauthorize', {
+  value: function (info) {
+    if (typeof this.delegate.onDeauthorize === 'function') {
+      this.onDeauthorize(info);
+    }
+  },
+  configurable: true
+});
 Scope.prototype.registerDownlink = function (downlink) {
   var scope = this;
   Object.defineProperty(downlink, 'onChannelClose', {
@@ -157,6 +263,7 @@ Scope.prototype.unregisterDownlink = function (downlink) {
   }
 };
 Scope.prototype.close = function () {
+  this.channel.unregisterDelegate(this);
   var downlinks = this.downlinks;
   Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
   for (var i = 0, n = downlinks.length; i < n; i += 1) {
@@ -167,13 +274,15 @@ Scope.prototype.close = function () {
 
 
 function HostScope(channel, hostUri) {
-  Scope.call(this);
-  Object.defineProperty(this, 'channel', {value: channel});
+  Scope.call(this, channel);
   Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
   Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
 }
 HostScope.prototype = Object.create(Scope.prototype);
 HostScope.prototype.constructor = HostScope;
+HostScope.prototype.authorize = function (credentials) {
+  this.channel.authorize(credentials);
+};
 HostScope.prototype.downlink = function () {
   return new DownlinkBuilder(this.channel, this).host(this.hostUri);
 };
@@ -209,8 +318,7 @@ HostScope.prototype.lane = function (nodeUri, laneUri) {
 
 
 function NodeScope(channel, hostUri, nodeUri) {
-  Scope.call(this);
-  Object.defineProperty(this, 'channel', {value: channel});
+  Scope.call(this, channel);
   Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
   Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
   Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
@@ -249,8 +357,7 @@ NodeScope.prototype.lane = function (laneUri) {
 
 
 function LaneScope(channel, hostUri, nodeUri, laneUri) {
-  Scope.call(this);
-  Object.defineProperty(this, 'channel', {value: channel});
+  Scope.call(this, channel);
   Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
   Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
   Object.defineProperty(this, 'laneUri', {value: laneUri, enumerable: true});
@@ -286,10 +393,16 @@ LaneScope.prototype.command = function (body) {
 };
 
 
-function Channel(hostUri, options) {
+function Channel(client, hostUri, options) {
+  options = options || {};
+  Object.defineProperty(this, 'client', {value: client, configurable: true});
   Object.defineProperty(this, 'hostUri', {value: hostUri, enumerable: true});
   Object.defineProperty(this, 'options', {value: options, enumerable: true});
+  Object.defineProperty(this, 'credentials', {value: options.credentials, writable: true});
+  Object.defineProperty(this, 'isAuthorized', {value: false, enumerable: true, writable: true});
+  Object.defineProperty(this, 'session', {value: null, enumerable: true, writable: true});
   Object.defineProperty(this, 'uriCache', {value: new UriCache(hostUri), configurable: true});
+  Object.defineProperty(this, 'delegates', {value: [], configurable: true});
   Object.defineProperty(this, 'downlinks', {value: {}, configurable: true});
   Object.defineProperty(this, 'sendBuffer', {value: [], configurable: true});
   Object.defineProperty(this, 'reconnectTimer', {value: null, writable: true});
@@ -317,11 +430,27 @@ Object.defineProperty(Channel.prototype, 'sendBufferSize', {
     return this.options.sendBufferSize || 1024;
   }
 });
+Object.defineProperty(Channel.prototype, 'isConnected', {
+  get: function () {
+    return this.socket && this.socket.readyState === this.socket.OPEN;
+  },
+  enumerable: true
+});
 Channel.prototype.resolve = function (unresolvedUri) {
   return this.uriCache.resolve(unresolvedUri);
 };
 Channel.prototype.unresolve = function (resolvedUri) {
   return this.uriCache.unresolve(resolvedUri);
+};
+Channel.prototype.authorize = function (credentials) {
+  if (recon.equal(credentials, this.credentials)) return;
+  this.credentials = credentials;
+  if (this.isConnected) {
+    var request = new proto.AuthRequest(credentials);
+    this.push(request);
+  } else {
+    this.open();
+  }
 };
 Channel.prototype.link = function (nodeUri, laneUri, options) {
   var downlink = new LinkedDownlink(this, this.hostUri, nodeUri, laneUri, options);
@@ -347,6 +476,16 @@ Channel.prototype.command = function (nodeUri, laneUri, body) {
   var message = new proto.CommandMessage(this.unresolve(nodeUri), laneUri, body);
   this.push(message);
 };
+Channel.prototype.registerDelegate = function (delegate) {
+  this.delegates.push(delegate);
+};
+Channel.prototype.unregisterDelegate = function (delegate) {
+  for (var i = 0, n = this.delegates.length; i < n; i += 1) {
+    if (this.delegates[i] === delegate) {
+      this.delegates.splice(i, 1);
+    }
+  }
+};
 Channel.prototype.registerDownlink = function (downlink) {
   this.clearIdle();
   var nodeUri = downlink.nodeUri;
@@ -356,8 +495,8 @@ Channel.prototype.registerDownlink = function (downlink) {
   laneDownlinks.push(downlink);
   nodeDownlinks[laneUri] = laneDownlinks;
   this.downlinks[nodeUri] = nodeDownlinks;
-  if (this.socket && this.socket.readyState === this.socket.OPEN) {
-    downlink.onChannelConnect();
+  if (this.isConnected) {
+    downlink.onChannelConnect({hostUri: this.hostUri});
   } else {
     this.open();
   }
@@ -378,7 +517,7 @@ Channel.prototype.unregisterDownlink = function (downlink) {
               delete this.downlinks[nodeUri];
               this.watchIdle();
             }
-            if (this.socket && this.socket.readyState === this.socket.OPEN) {
+            if (this.isConnected) {
               var request = new proto.UnlinkRequest(this.unresolve(nodeUri), laneUri);
               downlink.onUnlinkRequest(request);
               this.push(request);
@@ -407,6 +546,14 @@ Channel.prototype.onEnvelope = function (envelope) {
     this.onUnlinkRequest(envelope);
   } else if (envelope.isUnlinkedResponse) {
     this.onUnlinkedResponse(envelope);
+  } else if (envelope.isAuthRequest) {
+    this.onAuthRequest(envelope);
+  } else if (envelope.isAuthedResponse) {
+    this.onAuthedResponse(envelope);
+  } else if (envelope.isDeauthRequest) {
+    this.onDeauthRequest(envelope);
+  } else if (envelope.isDeauthedResponse) {
+    this.onDeauthedResponse(envelope);
   }
 };
 Channel.prototype.onEventMessage = function (message) {
@@ -486,48 +633,88 @@ Channel.prototype.onUnlinkedResponse = function (response) {
     }
   }
 };
+Channel.prototype.onAuthRequest = function (request) {
+  // TODO: Support client services.
+};
+Channel.prototype.onAuthedResponse = function (response) {
+  this.isAuthorized = true;
+  this.session = response.body;
+  var info = {hostUri: this.hostUri, session: this.session};
+  this.client.onChannelAuthorize(info);
+  for (var i = 0, n = this.delegates.length; i < n; i += 1) {
+    var delegate = this.delegates[i];
+    delegate.onChannelAuthorize(info);
+  }
+};
+Channel.prototype.onDeauthRequest = function (request) {
+  // TODO: Support client services.
+};
+Channel.prototype.onDeauthedResponse = function (response) {
+  this.isAuthorized = false;
+  this.session = null;
+  var info = {hostUri: this.hostUri, session: response.body};
+  this.client.onChannelDeauthorize(info);
+  for (var i = 0, n = this.delegates.length; i < n; i += 1) {
+    var delegate = this.delegates[i];
+    delegate.onChannelDeauthorize(info);
+  }
+};
 Channel.prototype.onConnect = function () {
+  var info = {hostUri: this.hostUri};
+  this.client.onChannelConnect(info);
+  for (var i = 0, n = this.delegates.length; i < n; i += 1) {
+    var delegate = this.delegates[i];
+    delegate.onChannelConnect(info);
+  }
   for (var nodeUri in this.downlinks) {
     var nodeDownlinks = this.downlinks[nodeUri];
     for (var laneUri in nodeDownlinks) {
       var laneDownlinks = nodeDownlinks[laneUri];
-      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+      for (i = 0, n = laneDownlinks.length; i < n; i += 1) {
         var downlink = laneDownlinks[i];
-        downlink.onChannelConnect();
+        downlink.onChannelConnect(info);
       }
     }
   }
 };
 Channel.prototype.onDisconnect = function () {
+  var info = {hostUri: this.hostUri};
+  this.client.onChannelDisconnect(info);
+  for (var i = 0, n = this.delegates.length; i < n; i += 1) {
+    var delegate = this.delegates[i];
+    delegate.onChannelDisconnect(info);
+  }
   for (var nodeUri in this.downlinks) {
     var nodeDownlinks = this.downlinks[nodeUri];
     for (var laneUri in nodeDownlinks) {
       var laneDownlinks = nodeDownlinks[laneUri].slice();
-      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+      for (i = 0, n = laneDownlinks.length; i < n; i += 1) {
         var downlink = laneDownlinks[i];
-        downlink.onChannelDisconnect();
+        downlink.onChannelDisconnect(info);
       }
     }
   }
 };
 Channel.prototype.onError = function () {
+  var info = {hostUri: this.hostUri};
+  this.client.onChannelError(info);
+  for (var i = 0, n = this.delegates.length; i < n; i += 1) {
+    var delegate = this.delegates[i];
+    delegate.onChannelError(info);
+  }
   for (var nodeUri in this.downlinks) {
     var nodeDownlinks = this.downlinks[nodeUri];
     for (var laneUri in nodeDownlinks) {
       var laneDownlinks = nodeDownlinks[laneUri];
-      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+      for (i = 0, n = laneDownlinks.length; i < n; i += 1) {
         var downlink = laneDownlinks[i];
-        downlink.onChannelError();
+        downlink.onChannelError(info);
       }
     }
   }
 };
 Channel.prototype.open = function () {
-  if (this.reconnectTimer) {
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
-    this.reconnectTimeout = 0;
-  }
+  this.clearReconnect();
   if (!this.socket) {
     this.socket = new WebSocket(this.hostUri, this.protocols);
     this.socket.onopen = this.onWebSocketOpen.bind(this);
@@ -537,6 +724,7 @@ Channel.prototype.open = function () {
   }
 };
 Channel.prototype.close = function () {
+  this.clearReconnect();
   this.clearIdle();
   if (this.socket) {
     this.socket.close();
@@ -566,6 +754,13 @@ Channel.prototype.reconnect = function () {
   }
   this.reconnectTimer = setTimeout(this.open.bind(this), this.reconnectTimeout);
 };
+Channel.prototype.clearReconnect = function () {
+  if (this.reconnectTimer) {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectTimeout = 0;
+  }
+};
 Channel.prototype.clearIdle = function () {
   if (this.idleTimer) {
     clearTimeout(this.idleTimer);
@@ -573,8 +768,7 @@ Channel.prototype.clearIdle = function () {
   }
 };
 Channel.prototype.watchIdle = function () {
-  if (this.socket && this.socket.readyState === this.socket.OPEN &&
-      this.sendBuffer.length === 0 && Object.keys(this.downlinks).length === 0) {
+  if (this.isConnected && this.sendBuffer.length === 0 && Object.keys(this.downlinks).length === 0) {
     this.idleTimer = setTimeout(this.checkIdle.bind(this), this.idleTimeout);
   }
 };
@@ -584,7 +778,7 @@ Channel.prototype.checkIdle = function () {
   }
 };
 Channel.prototype.push = function (envelope) {
-  if (this.socket && this.socket.readyState === this.socket.OPEN) {
+  if (this.isConnected) {
     this.clearIdle();
     var text = proto.stringify(envelope);
     this.socket.send(text);
@@ -599,6 +793,10 @@ Channel.prototype.push = function (envelope) {
   }
 };
 Channel.prototype.onWebSocketOpen = function () {
+  if (this.credentials) {
+    var request = new proto.AuthRequest(this.credentials);
+    this.push(request);
+  }
   this.onConnect();
   var envelope;
   while ((envelope = this.sendBuffer.shift())) {
@@ -628,6 +826,8 @@ Channel.prototype.onWebSocketError = function () {
   }
 };
 Channel.prototype.onWebSocketClose = function () {
+  this.isAuthorized = false;
+  this.session = null;
   this.socket = null;
   this.onDisconnect();
   this.clearIdle();
@@ -786,7 +986,7 @@ function Downlink(channel, hostUri, nodeUri, laneUri, options) {
   Object.defineProperty(this, 'nodeUri', {value: nodeUri, enumerable: true});
   Object.defineProperty(this, 'laneUri', {value: laneUri, enumerable: true});
   Object.defineProperty(this, 'options', {value: options, enumerable: true});
-  Object.defineProperty(this, 'delegate', {value: options.delegate || this, writable: true});
+  Object.defineProperty(this, 'delegate', {value: options.delegate || this, enumerable: true, writable: true});
 }
 Object.defineProperty(Downlink.prototype, 'prio', {
   get: function () {
@@ -801,10 +1001,21 @@ Object.defineProperty(Downlink.prototype, 'keepAlive', {
     this.options.keepAlive = keepAlive;
   }
 });
-Object.defineProperty(Downlink.prototype, 'connected', {
+Object.defineProperty(Downlink.prototype, 'isConnected', {
   get: function () {
-    var socket = this.channel.socket;
-    return socket && socket.readyState === socket.OPEN;
+    return this.channel.isConnected;
+  },
+  enumerable: true
+});
+Object.defineProperty(Downlink.prototype, 'isAuthorized', {
+  get: function () {
+    return this.channel.isAuthorized;
+  },
+  enumerable: true
+});
+Object.defineProperty(Downlink.prototype, 'session', {
+  get: function () {
+    return this.channel.session;
   },
   enumerable: true
 });
@@ -873,17 +1084,17 @@ Object.defineProperty(Downlink.prototype, 'onUnlinkedResponse', {
   configurable: true
 });
 Object.defineProperty(Downlink.prototype, 'onChannelConnect', {
-  value: function () {
+  value: function (info) {
     if (typeof this.delegate.onConnect === 'function') {
-      this.delegate.onConnect();
+      this.delegate.onConnect(info);
     }
   },
   configurable: true
 });
 Object.defineProperty(Downlink.prototype, 'onChannelDisconnect', {
-  value: function () {
+  value: function (info) {
     if (typeof this.delegate.onDisconnect === 'function') {
-      this.delegate.onDisconnect();
+      this.delegate.onDisconnect(info);
     }
     if (!this.keepAlive) {
       this.close();
@@ -892,9 +1103,9 @@ Object.defineProperty(Downlink.prototype, 'onChannelDisconnect', {
   configurable: true
 });
 Object.defineProperty(Downlink.prototype, 'onChannelError', {
-  value: function () {
+  value: function (info) {
     if (typeof this.delegate.onError === 'function') {
-      this.delegate.onError();
+      this.delegate.onError(info);
     }
   },
   configurable: true
@@ -918,8 +1129,8 @@ function LinkedDownlink(channel, hostUri, nodeUri, laneUri, options) {
 LinkedDownlink.prototype = Object.create(Downlink.prototype);
 LinkedDownlink.prototype.constructor = LinkedDownlink;
 Object.defineProperty(LinkedDownlink.prototype, 'onChannelConnect', {
-  value: function () {
-    Downlink.prototype.onChannelConnect.call(this);
+  value: function (info) {
+    Downlink.prototype.onChannelConnect.call(this, info);
     var nodeUri = this.channel.unresolve(this.nodeUri);
     var request = new proto.LinkRequest(nodeUri, this.laneUri, this.prio);
     this.onLinkRequest(request);
@@ -935,8 +1146,8 @@ function SyncedDownlink(channel, hostUri, nodeUri, laneUri, options) {
 SyncedDownlink.prototype = Object.create(Downlink.prototype);
 SyncedDownlink.prototype.constructor = SyncedDownlink;
 Object.defineProperty(SyncedDownlink.prototype, 'onChannelConnect', {
-  value: function () {
-    Downlink.prototype.onChannelConnect.call(this);
+  value: function (info) {
+    Downlink.prototype.onChannelConnect.call(this, info);
     var nodeUri = this.channel.unresolve(this.nodeUri);
     var request = new proto.SyncRequest(nodeUri, this.laneUri, this.prio);
     this.onSyncRequest(request);

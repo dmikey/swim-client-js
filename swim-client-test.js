@@ -22,6 +22,7 @@ function TestFixture() {
 }
 TestFixture.prototype.start = function (done) {
   var test = this;
+  test.client = swim.client();
   test.httpServer = http.createServer();
   test.httpServer.listen(8009, function () {
     done();
@@ -29,7 +30,6 @@ TestFixture.prototype.start = function (done) {
   test.wsServer = new WebSocket.server({
     httpServer: test.httpServer
   });
-  test.client = swim.client();
   test.wsServer.on('request', function (request) {
     test.connection = request.accept(request.origin);
     test.connection.on('message', function (frame) {
@@ -54,12 +54,16 @@ TestFixture.prototype.start = function (done) {
 };
 TestFixture.prototype.stop = function (done) {
   var test = this;
-  if (test.client) test.client.close();
-  if (test.connection) test.connection.close();
+  if (test.client) {
+    test.client.close();
+    test.client = null;
+  }
+  if (test.connection) {
+    test.connection.close();
+    test.connection = null;
+  }
   test.wsServer.shutDown();
   test.httpServer.close(function () {
-    test.client = null;
-    test.connection = null;
     test.wsServer = null;
     test.httpServer = null;
     done();
@@ -88,6 +92,56 @@ function initSuite(suite) {
 
 describe('Client', function () {
   initSuite(this);
+
+  it('should receive onConnect callbacks on a client scope', function (done) {
+    test.client.onConnect = function (info) {
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    test.client.command(test.hostUri, '/null', 'wakeup');
+  });
+
+  it('should receive onDisconnect callbacks on a client scope', function (done) {
+    test.client.onConnect = function (info) {
+      test.close();
+    };
+    test.client.onDisconnect = function (info) {
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    test.client.command(test.hostUri, '/null', 'wakeup');
+  });
+
+  it('should authorize a host through a client scope', function (done) {
+    test.receive = function (request) {
+      assert(request.isAuthRequest);
+      assert.same(request.body, [{key: 1234}]);
+      test.send(new proto.AuthedResponse({id: 5678}));
+    };
+    test.client.onAuthorize = function (info) {
+      assert.equal(info.hostUri, test.hostUri);
+      assert.same(info.session, [{id: 5678}]);
+      done();
+    };
+    test.client.authorize(test.hostUri, {key: 1234});
+  });
+
+  it('should fail to authorize a host through a client scope', function (done) {
+    test.receive = function (request) {
+      assert(request.isAuthRequest);
+      assert.same(request.body, [{key: 1234}]);
+      test.send(new proto.DeauthedResponse({'@denied': null}));
+    };
+    test.client.onAuthorize = function (info) {
+      assert.fail();
+    };
+    test.client.onDeauthorize = function (info) {
+      assert.equal(info.hostUri, test.hostUri);
+      assert.same(info.session, [{'@denied': null}]);
+      done();
+    };
+    test.client.authorize(test.hostUri, {key: 1234});
+  });
 
   it('should build a downlink through a client scope', function () {
     var downlink = test.client.downlink()
@@ -358,6 +412,66 @@ describe('HostScope', function () {
     assert.equal(host.hostUri, test.hostUri);
   });
 
+  it('should receive onConnect callbacks on a host scope', function (done) {
+    var host = test.client.host(test.hostUri);
+    host.onConnect = function (info) {
+      assert(host.isConnected);
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    host.command('/null', 'wakeup');
+  });
+
+  it('should receive onDisconnect callbacks on a host scope', function (done) {
+    var host = test.client.host(test.hostUri);
+    host.onConnect = function (info) {
+      test.close();
+    };
+    host.onDisconnect = function (info) {
+      assert(!host.isConnected);
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    host.command('/null', 'wakeup');
+  });
+
+  it('should authorize a host scope', function (done) {
+    test.receive = function (request) {
+      assert(request.isAuthRequest);
+      assert.same(request.body, [{key: 1234}]);
+      test.send(new proto.AuthedResponse({id: 5678}));
+    };
+    var host = test.client.host(test.hostUri);
+    host.onAuthorize = function (info) {
+      assert(host.isAuthorized);
+      assert.equal(host.session, info.session);
+      assert.equal(info.hostUri, test.hostUri);
+      assert.same(info.session, [{id: 5678}]);
+      done();
+    };
+    host.authorize({key: 1234});
+  });
+
+  it('should fail to authorize a host scope', function (done) {
+    test.receive = function (request) {
+      assert(request.isAuthRequest);
+      assert.same(request.body, [{key: 1234}]);
+      test.send(new proto.DeauthedResponse({'@denied': null}));
+    };
+    var host = test.client.host(test.hostUri);
+    host.onAuthorize = function (info) {
+      assert.fail();
+    };
+    host.onDeauthorize = function (info) {
+      assert(!host.isAuthorized);
+      assert.equal(host.session, null);
+      assert.equal(info.hostUri, test.hostUri);
+      assert.same(info.session, [{'@denied': null}]);
+      done();
+    };
+    host.authorize({key: 1234});
+  });
+
   it('should build a downlink through a host scope', function () {
     var host = test.client.host(test.hostUri);
     var downlink = host.downlink()
@@ -607,6 +721,29 @@ describe('NodeScope', function () {
     assert.equal(node1.hostUri, 'ws://example.com');
     var node2 = test.client.node('swims://example.com/');
     assert.equal(node2.hostUri, 'wss://example.com');
+  });
+
+  it('should receive onConnect callbacks on a node scope', function (done) {
+    var node = test.client.node(test.hostUri, '/null');
+    node.onConnect = function (info) {
+      assert(node.isConnected);
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    node.command('wakeup');
+  });
+
+  it('should receive onDisconnect callbacks on a node scope', function (done) {
+    var node = test.client.node(test.hostUri, '/null');
+    node.onConnect = function (info) {
+      test.close();
+    };
+    node.onDisconnect = function (info) {
+      assert(!node.isConnected);
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    node.command('wakeup');
   });
 
   it('should build a downlink through a node scope', function () {
@@ -862,6 +999,29 @@ describe('LaneScope', function () {
     assert.equal(lane.hostUri, test.hostUri);
     assert.equal(lane.nodeUri, nodeUri);
     assert.equal(lane.laneUri, 'light/on');
+  });
+
+  it('should receive onConnect callbacks on a lane scope', function (done) {
+    var lane = test.client.lane(test.hostUri, '/null', 'wakeup');
+    lane.onConnect = function (info) {
+      assert(lane.isConnected);
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    lane.command();
+  });
+
+  it('should receive onDisconnect callbacks on a lane scope', function (done) {
+    var lane = test.client.lane(test.hostUri, '/null', 'wakeup');
+    lane.onConnect = function (info) {
+      test.close();
+    };
+    lane.onDisconnect = function (info) {
+      assert(!lane.isConnected);
+      assert.equal(info.hostUri, test.hostUri);
+      done();
+    };
+    lane.command();
   });
 
   it('should build a downlink through a lane scope', function () {
@@ -2079,6 +2239,36 @@ describe('DownlinkBuilder', function () {
 describe('Channel', function () {
   initSuite(this);
 
+  it('should reauthorize reopened connections', function (done) {
+    var messageCount = 0;
+    test.receive = function (request) {
+      messageCount += 1;
+      if (messageCount === 1) {
+        assert(request.isAuthRequest);
+        assert.same(request.body, [{key: 1234}]);
+        test.close();
+      } else if (messageCount === 2) {
+        assert(request.isAuthRequest);
+        assert.same(request.body, [{key: 1234}]);
+        test.send(new proto.AuthedResponse({id: 5678}));
+      } else {
+        assert(request.isCommandMessage);
+      }
+    };
+    test.client.onDisconnect = function () {
+      if (messageCount === 1) {
+        test.client.command(test.hostUri, '/null', 'wakeup');
+      }
+    };
+    test.client.onAuthorize = function (info) {
+      assert.equal(messageCount, 3);
+      assert.equal(info.hostUri, test.hostUri);
+      assert.same(info.session, [{id: 5678}]);
+      done();
+    };
+    test.client.authorize(test.hostUri, {key: 1234});
+  });
+
   it('should link and unlink multiple lanes', function (done) {
     var linkCount = 0;
     var unlinkCount = 0;
@@ -2250,10 +2440,32 @@ describe('Channel', function () {
     };
     var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
     downlink.onLinked = function (response) {
-      assert(downlink.connected);
+      assert(downlink.isConnected);
     };
     downlink.onDisconnect = function (response) {
-      assert(!downlink.connected);
+      assert(!downlink.isConnected);
+      done();
+    };
+  });
+
+  it('should return the authorization parameters of active links', function (done) {
+    test.receive = function (request) {
+      if (request.isAuthRequest) {
+        test.send(new proto.AuthedResponse({id: 5678}));
+      } else if (request.isLinkRequest) {
+        test.send(new proto.LinkedResponse(request.node, request.lane));
+        test.close();
+      }
+    };
+    test.client.authorize(test.hostUri, {key: 1234});
+    var downlink = test.client.link(test.resolve('house/kitchen#light'), 'light/on');
+    downlink.onLinked = function (response) {
+      assert(downlink.isAuthorized);
+      assert.same(downlink.session, [{id: 5678}]);
+    };
+    downlink.onDisconnect = function (response) {
+      assert(!downlink.isAuthorized);
+      assert.equal(downlink.session, null);
       done();
     };
   });

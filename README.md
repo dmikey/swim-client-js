@@ -47,6 +47,13 @@ var client = swim.client();
 
 ### Client
 
+#### client.authorize(hostUri, credentials)
+
+Authorizes all connections to `hostUri` through this `client` using the
+provided `credentials` object.  `credentials` might contain, for example,
+a [Google Sign-In ID token](https://developers.google.com/identity/sign-in/web/).
+Note that connections to public hosts may not require authorization.
+
 #### client.downlink()
 
 Returns a new [DownlinkBuilder](#downlinkbuilder) for constructing a link to
@@ -140,14 +147,140 @@ connect to, otherwise `nodeUri` must include a network authority component.
 
 #### client.close()
 
-Unlinks all active links, and closes all network connections, associated with
+Unlinks all downlinks, and closes all network connections, associated with
 the client connection pool.
 
+### Client Callbacks
+
+Client callbacks are invoked on the `delegate` member of a `Client` object.
+By default, a `Client` is its own delegate, so callbacks can be assigned
+directly to the client object.  If `delegate` is reassigned, then callbacks
+will instead by invoked on the assigned `delegate` object instead.
+
+#### client.onConnect = function (info) {}
+
+The `onConnect` callback gets invoked when a network connection managed by the
+`client` is connected.
+
+- `info.hostUri`: the URI of the host that connected.
+
+#### client.onDisconnect = function (info) {}
+
+The `onConnect` callback gets invoked when a network connection managed by the
+`client` is disconnected.
+
+- `info.hostUri`: the URI of the host that disconnected.
+
+#### client.onError = function (info) {}
+
+The `onError` callback gets invoked when a network connection managed by the
+`client` encounters an error.
+
+- `info.hostUri`: the URI of the host that disconnected.
+
+#### client.onAuthorize = function (info) {}
+
+The `onAuthorize` callback gets invoked when a network connection managed by
+the `client` is successfully authorized by the remote host.
+
+- `info.hostUri`: the URI of the authorized host.
+- `info.session`: the authorization parameters returned by the remote host.
+
+#### client.onDeauthorize = function (info) {}
+
+The `onDeauthorize` callback gets invoked when a network connection managed by
+the `client` is deauthorized by the remote host, or when the host rejects an
+authorization request.
+
+- `info.hostUri`: the URI of the deauthorized host.
+- `info.session`: the authorization parameters returned by the remote host.
+
+### Scope
+
+A `Scope` object monitors the lifecycle of [downlinks](#downlink) created
+through the scope.
+
+- [HostScope](#hostscope): manages a set of downlinks to a particular remote `hostUri`.
+- [NodeScope](#nodescope): manages a set of downlinks to a particular remote `nodeUri`.
+- [LaneScope](#lanescope): manages a set of downlinks to a particular `laneUri`
+  of some remote `nodeUri`.
+
+#### scope.isConnected
+
+Returns `true` if there is an active network connection to this scope's remote host.
+
+#### scope.isAuthorized
+
+Returns `true` if the network connection to this scope's remote host has been
+successfully authorized.
+
+#### scope.session
+
+Returns the authorization parameters provided by the remote host, if the
+client was explicitly authorized by the host.  Returns `null` if the connection
+is closed, or if the connection is open but not authorized.
+
+#### scope.close()
+
+Unlinks all downlinks registered with the scope.
+
+### Scope Callbacks
+
+Scope callbacks are invoked on the `delegate` member of a `Scope` object.
+By default, a `Scope` is its own delegate, so callbacks can be assigned
+directly to the scope object.  If `delegate` is reassigned, then callbacks
+will instead by invoked on the assigned `delegate` object instead.
+
+#### scope.onConnect = function (info) {}
+
+The `onConnect` callback gets invoked when a network connection to the scope's
+remote host is connected.
+
+- `info.hostUri`: the URI of the host that connected.
+
+#### scope.onDisconnect = function (info) {}
+
+The `onConnect` callback gets invoked when a network connection to the scope's
+remote host is disconnected.
+
+- `info.hostUri`: the URI of the host that disconnected.
+
+#### scope.onError = function (info) {}
+
+The `onError` callback gets invoked when a network connection to the scope's
+remote host encounters an error.
+
+- `info.hostUri`: the URI of the host that disconnected.
+
+#### scope.onAuthorize = function (info) {}
+
+The `onAuthorize` callback gets invoked when a network connection to the scope's
+remote host is successfully authorized by the host.
+
+- `info.hostUri`: the URI of the authorized host.
+- `info.session`: the authorization parameters returned by the remote host.
+
+#### scope.onDeauthorize = function (info) {}
+
+The `onDeauthorize` callback gets invoked when a network connection to the
+scope's remote host is deauthorized by the host, or when the host rejects an
+authorization request.
+
+- `info.hostUri`: the URI of the deauthorized host.
+- `info.session`: the authorization parameters returned by the remote host.
+
 ### HostScope
+
+`HostScope` extends the [Scope](#scope) interface.
 
 #### host.hostUri
 
 Returns the URI of the remote host to which the scope is bound.
+
+#### host.authorize(credentials)
+
+Authorizes connections to the host to which this scope is bound using the
+provided `credentials` object.
 
 #### host.downlink()
 
@@ -196,9 +329,11 @@ the given `nodeUri` on the remote `hostUri` to which this scope is bound.
 
 #### host.close()
 
-Unlinks all active links registered with the scope.
+Unlinks all downlinks registered with the scope.
 
 ### NodeScope
+
+`NodeScope` extends the [Scope](#scope) interface.
 
 #### node.hostUri
 
@@ -251,9 +386,11 @@ the `nodeUri` and the `hostUri` to which this scope is bound.
 
 #### node.close()
 
-Unlinks all active links registered with the scope.
+Unlinks all downlinks registered with the scope.
 
 ### LaneScope
+
+`LaneScope` extends the [Scope](#scope) interface.
 
 #### lane.hostUri
 
@@ -304,7 +441,7 @@ Sends a command to the remote lane to which this scope is bound.
 
 #### lane.close()
 
-Unlinks all active links registered with the scope.
+Unlinks all downlinks registered with the scope.
 
 ### Downlink
 
@@ -335,9 +472,20 @@ Returns `true` if the link should be automatically re-established after
 connection failures.  The keepAlive mode can be changed at any time by
 assigning a new value to this property.
 
-#### downlink.connected
+#### downlink.isConnected
 
 Returns `true` if the link is currently connected.
+
+#### downlink.isAuthorized
+
+Returns `true` if the network connection carrying the link has been explicitly
+authorized.  Note that not all links require authorization.
+
+#### downlink.session
+
+Returns the authorization parameters of the network connection carrying this
+link, if the link was explicitly authorized by the remote host.  Returns `null`
+if the link is disconnected, or if the link is connected but not authorized.
 
 #### downlink.delegate[ = delegate]
 
@@ -350,12 +498,12 @@ new object to this property.
 Unregisters the downlink so that it no longer receives events.  If this was the
 only active link to a particular remote lane, the link will be unlinked.
 
-### Downlink Events
+### Downlink Callbacks
 
 Downlink callbacks are invoked on the `delegate` member of a `Downlink` object.
 By default, a `Downlink` is its own delegate, so callbacks can be assigned
 directly to the downlink object.  If `delegate` is reassigned, then callbacks
-will instead by invoked on the given `delegate` object.
+will instead by invoked on the assigned `delegate` object instead.
 
 #### downlink.onEvent = function (message) {}
 
@@ -441,8 +589,8 @@ carries the link is disconnected.
 #### downlink.onError = function () {}
 
 The `onError` callback gets invoked when the network connection that carries
-the link signals an error.  Unfortunately, the underlying network APIs don't
-provide any detail on network errors.  Errors always cause the underlying
+the link encounters an error.  Unfortunately, the underlying network APIs
+don't provide any detail on network errors.  Errors always cause the underlying
 network connection to close; `keepAlive` links will automatically reconnect
 after network errors.
 
