@@ -716,7 +716,9 @@ Channel.prototype.onError = function () {
 Channel.prototype.open = function () {
   this.clearReconnect();
   if (!this.socket) {
-    this.socket = new WebSocket(this.hostUri, this.protocols);
+    this.socket = this.protocols ?
+      new WebSocket(this.hostUri, this.protocols) :
+      new WebSocket(this.hostUri);
     this.socket.onopen = this.onWebSocketOpen.bind(this);
     this.socket.onmessage = this.onWebSocketMessage.bind(this);
     this.socket.onerror = this.onWebSocketError.bind(this);

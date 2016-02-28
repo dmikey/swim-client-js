@@ -1,6 +1,6 @@
 {
   "name": "swim-client-js",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Swim Client JavaScript Implementation",
   "homepage": "https://github.com/swimit/swim-client-js",
   "author": "Chris Sachs <chris@swim.it>",

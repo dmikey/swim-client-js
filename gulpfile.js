@@ -25,7 +25,6 @@ var uglify = require('gulp-uglify');
 
 var devel = args.devel || false;
 var debug = args.debug || devel; // --devel implies --debug
-var proto = args.proto;
 
 //
 // Paths
