@@ -268,7 +268,7 @@ Scope.prototype.close = function () {
   Object.defineProperty(this, 'downlinks', {value: [], configurable: true});
   for (var i = 0, n = downlinks.length; i < n; i += 1) {
     var downlink = downlinks[i];
-    downlink.__proto__.onChannelClose.call(downlink);
+    downlink.close();
   }
 };
 
