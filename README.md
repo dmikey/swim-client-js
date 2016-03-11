@@ -56,8 +56,8 @@ Note that connections to public hosts may not require authorization.
 
 #### client.downlink()
 
-Returns a new [DownlinkBuilder](#downlinkbuilder) for constructing a link to
-a lane of a remote node.
+Returns a new [DownlinkBuilder](#downlinkbuilder), which is used to establish
+a new link to a lane of some remote node.
 
 #### client.link([hostUri, ]nodeUri, laneUri[, options])
 
@@ -124,7 +124,7 @@ map lane.
 
 #### client.command([hostUri, ]nodeUri, laneUri, body)
 
-Sends a command to a lane of a remote node.  If provided,`hostUri` specifies
+Sends a command to a lane of a remote node.  If provided, `hostUri` specifies
 the network endpoint to connect to, otherwise `nodeUri` must include a network
 authority component.  `body` can be any JSON-compatible object; `body` is
 serialized as [RECON](https://github.com/swimit/recon-js).
@@ -155,30 +155,30 @@ the client connection pool.
 Client callbacks are invoked on the `delegate` member of a `Client` object.
 By default, a `Client` is its own delegate, so callbacks can be assigned
 directly to the client object.  If `delegate` is reassigned, then callbacks
-will instead by invoked on the assigned `delegate` object instead.
+will instead by invoked on the assigned `delegate` object.
 
-#### client.onConnect = function (info) {}
+#### client.onConnect = function (info)
 
 The `onConnect` callback gets invoked when a network connection managed by the
 `client` is connected.
 
 - `info.hostUri`: the URI of the host that connected.
 
-#### client.onDisconnect = function (info) {}
+#### client.onDisconnect = function (info)
 
 The `onConnect` callback gets invoked when a network connection managed by the
 `client` is disconnected.
 
 - `info.hostUri`: the URI of the host that disconnected.
 
-#### client.onError = function (info) {}
+#### client.onError = function (info)
 
 The `onError` callback gets invoked when a network connection managed by the
 `client` encounters an error.
 
 - `info.hostUri`: the URI of the host that disconnected.
 
-#### client.onAuthorize = function (info) {}
+#### client.onAuthorize = function (info)
 
 The `onAuthorize` callback gets invoked when a network connection managed by
 the `client` is successfully authorized by the remote host.
@@ -186,7 +186,7 @@ the `client` is successfully authorized by the remote host.
 - `info.hostUri`: the URI of the authorized host.
 - `info.session`: the authorization parameters returned by the remote host.
 
-#### client.onDeauthorize = function (info) {}
+#### client.onDeauthorize = function (info)
 
 The `onDeauthorize` callback gets invoked when a network connection managed by
 the `client` is deauthorized by the remote host, or when the host rejects an
@@ -229,30 +229,30 @@ Unlinks all downlinks registered with the scope.
 Scope callbacks are invoked on the `delegate` member of a `Scope` object.
 By default, a `Scope` is its own delegate, so callbacks can be assigned
 directly to the scope object.  If `delegate` is reassigned, then callbacks
-will instead by invoked on the assigned `delegate` object instead.
+will instead by invoked on the assigned `delegate` object.
 
-#### scope.onConnect = function (info) {}
+#### scope.onConnect = function (info)
 
 The `onConnect` callback gets invoked when a network connection to the scope's
 remote host is connected.
 
 - `info.hostUri`: the URI of the host that connected.
 
-#### scope.onDisconnect = function (info) {}
+#### scope.onDisconnect = function (info)
 
 The `onConnect` callback gets invoked when a network connection to the scope's
 remote host is disconnected.
 
 - `info.hostUri`: the URI of the host that disconnected.
 
-#### scope.onError = function (info) {}
+#### scope.onError = function (info)
 
 The `onError` callback gets invoked when a network connection to the scope's
 remote host encounters an error.
 
 - `info.hostUri`: the URI of the host that disconnected.
 
-#### scope.onAuthorize = function (info) {}
+#### scope.onAuthorize = function (info)
 
 The `onAuthorize` callback gets invoked when a network connection to the scope's
 remote host is successfully authorized by the host.
@@ -260,7 +260,7 @@ remote host is successfully authorized by the host.
 - `info.hostUri`: the URI of the authorized host.
 - `info.session`: the authorization parameters returned by the remote host.
 
-#### scope.onDeauthorize = function (info) {}
+#### scope.onDeauthorize = function (info)
 
 The `onDeauthorize` callback gets invoked when a network connection to the
 scope's remote host is deauthorized by the host, or when the host rejects an
@@ -447,24 +447,24 @@ Unlinks all downlinks registered with the scope.
 
 #### downlink.hostUri
 
-Returns the URI containing the network authority of the downlink.
+Returns the URI of the host to which `downlink` connects.
 
 #### downlink.nodeUri
 
-Returns the URI of the remote node to which this link is connected.  Returns
-an absolute URI resolved against the `hostUri`.
+Returns the URI of the remote node to which `downlink` connects.  Returns an
+absolute URI resolved against the `hostUri`.
 
 #### downlink.laneUri
 
-Returns the URI of the lane to which this link is connected.
+Returns the URI of the lane to which `downlink` connects.
 
 #### downlink.options
 
-Returns the `options` object provided when the link was created.
+Returns the `options` object provided when `downlink` was created.
 
 #### downlink.prio
 
-Returns the floating point priority level of the link.
+Returns the floating point priority level of the `downlink`.
 
 #### downlink.keepAlive[ = keepAlive]
 
@@ -493,6 +493,10 @@ Returns the object on which to invoke event callbacks.  Defaults to the
 `downlink` object itself.  The event delegate can be changed by assigning a
 new object to this property.
 
+#### downlink.command(body)
+
+Sends a command to the remote lane to which this downlink is connected.
+
 #### downlink.close()
 
 Unregisters the downlink so that it no longer receives events.  If this was the
@@ -503,9 +507,9 @@ only active link to a particular remote lane, the link will be unlinked.
 Downlink callbacks are invoked on the `delegate` member of a `Downlink` object.
 By default, a `Downlink` is its own delegate, so callbacks can be assigned
 directly to the downlink object.  If `delegate` is reassigned, then callbacks
-will instead by invoked on the assigned `delegate` object instead.
+will instead by invoked on the assigned `delegate` object.
 
-#### downlink.onEvent = function (message) {}
+#### downlink.onEvent = function (message)
 
 The `onEvent` callback gets invoked every time the downlink receives an event.
 
@@ -513,7 +517,7 @@ The `onEvent` callback gets invoked every time the downlink receives an event.
 - `message.laneUri`: the URI of the lane that published the event.
 - `message.body`: the plain old JavaScript value of the event, decoded from RECON.
 
-#### downlink.onLink = function (request) {}
+#### downlink.onLink = function (request)
 
 The `onLink` callback gets invoked when the downlink is about to send a `@link`
 request to the remote host to establish a new link.
@@ -523,7 +527,7 @@ request to the remote host to establish a new link.
 - `request.prio`: the requested priority of the link.
 - `request.body`: an optional request body to send to the remote lane.
 
-#### downlink.onLinked = function (response) {}
+#### downlink.onLinked = function (response)
 
 The `onLinked` callback gets invoked when the downlink receives a `@linked`
 response from the remote host, indicating the link has been established.
@@ -533,7 +537,7 @@ response from the remote host, indicating the link has been established.
 - `response.prio`: the established priority of the link.
 - `response.body`: an optional response body sent by the remote lane.
 
-#### downlink.onSync = function (request) {}
+#### downlink.onSync = function (request)
 
 The `onSync` callback gets invoked when the downlink is about to send a `@sync`
 request to the remote host to establish a new link and synchronize its state.
@@ -543,7 +547,7 @@ request to the remote host to establish a new link and synchronize its state.
 - `request.prio`: the requested priority of the link.
 - `request.body`: an optional request body to send to the remote lane.
 
-#### downlink.onSynced = function (response) {}
+#### downlink.onSynced = function (response)
 
 The `onSynced` callback gets invoked when the downlink receives a `@synced`
 response from the remote host, indicating that the link has finished sending
@@ -553,7 +557,7 @@ its initial state events.
 - `response.laneUri`: the URI of the synced lane.
 - `response.body`: an optional response body sent by the remote lane.
 
-#### downlink.onUnlink = function (request) {}
+#### downlink.onUnlink = function (request)
 
 The `onUnlink` callback gets invoked when the downlink is about to send an
 `@unlink` request to the remote host in order to teardown a previously
@@ -564,7 +568,7 @@ the only active link to a particular remote lane.
 - `request.laneUri`: the URI of the lane to unlink.
 - `request.body`: an optional request body to send to the remote lane.
 
-#### downlink.onUnlinked = function (response) {}
+#### downlink.onUnlinked = function (response)
 
 The `onUnlinked` callback gets invoked when the downlink receives an `@unlinked`
 response from the remote host.  This indicates that the remote host has
@@ -576,17 +580,17 @@ rejected the link.  The link will now close, regardless of whether
 - `response.body`: an optional response body sent by the remote lane, which may
   indicate the cause of the unlink.
 
-#### downlink.onConnect = function () {}
+#### downlink.onConnect = function ()
 
 The `onConnect` callback gets invoked when the network connection that carries
 the link is connected.
 
-#### downlink.onDisconnect = function () {}
+#### downlink.onDisconnect = function ()
 
 The `onDisconnect` callback gets invoked when the network connection that
 carries the link is disconnected.
 
-#### downlink.onError = function () {}
+#### downlink.onError = function ()
 
 The `onError` callback gets invoked when the network connection that carries
 the link encounters an error.  Unfortunately, the underlying network APIs
@@ -594,7 +598,7 @@ don't provide any detail on network errors.  Errors always cause the underlying
 network connection to close; `keepAlive` links will automatically reconnect
 after network errors.
 
-#### downlink.onClose = function () {}
+#### downlink.onClose = function ()
 
 The `onClose` callback gets invoked when the downlink has been disconnected and
 will not be reconnected.  This happens when the client calls `downlink.close()`,
@@ -651,11 +655,11 @@ change to the remote lane.  Returns `undefined` if the list is empty.
 Moves that value at index `fromIndex` to index `toIndex`, pushing the change
 to the remote lane.
 
-#### listDownlink.splice(start, deleteCount[, value1, ..., valueN])
+#### listDownlink.splice(startIndex, deleteCount[, value1, ..., valueN])
 
-Removes `deleteCount` elements from the downlinked list state, starting index
-`start`, and inserts zero or more new values at index `start`.  Pushes all
-changes to the remote lane.
+Removes `deleteCount` elements from the downlinked list state, starting at
+index `start`, and inserts zero or more new values at `startIndex`.  Pushes
+all changes to the remote lane.
 
 #### listDownlink.clear()
 
@@ -667,9 +671,9 @@ Returns `this`.
 Invokes `callback` for every value in the downlinked list state.  If provided,
 `thisArg` will be passed to each invocation of `callback` for use as its `this` value.
 
-`callback` is invoked with two arguments:
+`callback` is invoked with three arguments:
 - the current list value
-- index of the current list value
+- the index of the current list value
 - the `listDownlink` being traversed
 
 #### listDownlink.state

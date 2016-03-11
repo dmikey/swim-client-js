@@ -1,6 +1,6 @@
 {
   "name": "swim-client-js",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Swim Client JavaScript Implementation",
   "homepage": "https://github.com/swimit/swim-client-js",
   "author": "Chris Sachs <chris@swim.it>",
@@ -26,8 +26,8 @@
     "web"
   ],
   "dependencies": {
-    "recon-js": "^0.3.8",
-    "swim-proto-js": "^0.4.1",
+    "recon-js": "^0.3.9",
+    "swim-proto-js": "^0.4.2",
     "websocket": "^1.0.22"
   },
   "devDependencies": {
@@ -51,12 +51,12 @@
     "vinyl-source-stream": "^1.1.0",
     "yargs": "^4.2.0"
   },
+  "bugs": {
+    "url": "https://github.com/swimit/swim-client-js/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/swimit/swim-client-js.git"
-  },
-  "bugs": {
-    "url": "https://github.com/swimit/swim-client-js/issues"
   },
   "scripts": {
     "test": "gulp",

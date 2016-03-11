@@ -1,7 +1,7 @@
 'use strict';
 
 var config = require('./config.json');
-var recon = require('recon-js');
+var recon = global.recon || require('recon-js');
 var proto = require('swim-proto-js');
 var WebSocket = global.WebSocket || require('websocket').w3cwebsocket;
 
@@ -1120,6 +1120,9 @@ Object.defineProperty(Downlink.prototype, 'onChannelClose', {
   },
   configurable: true
 });
+Downlink.prototype.command = function (body) {
+  this.channel.command(this.nodeUri, this.laneUri, body);
+};
 Downlink.prototype.close = function () {
   this.channel.unregisterDownlink(this);
 };
@@ -1253,6 +1256,7 @@ ListDownlink.prototype.get = function (index) {
   return this.state[index];
 };
 ListDownlink.prototype.set = function (index, value) {
+  value = recon(value !== undefined ? value : this.get(index));
   this.state[index] = value;
   var nodeUri = this.channel.unresolve(this.nodeUri);
   var body = recon.concat(recon({'@update': recon({index: index})}), value);
@@ -1263,7 +1267,7 @@ ListDownlink.prototype.set = function (index, value) {
 ListDownlink.prototype.push = function () {
   var nodeUri = this.channel.unresolve(this.nodeUri);
   for (var i = 0, n = arguments.length; i < n; i += 1) {
-    var value = arguments[i];
+    var value = recon(arguments[i]);
     this.state.push(value);
     var message = new proto.CommandMessage(nodeUri, this.laneUri, value);
     this.onCommandMessage(message);
@@ -1286,7 +1290,7 @@ ListDownlink.prototype.pop = function () {
 ListDownlink.prototype.unshift = function () {
   var nodeUri = this.channel.unresolve(this.nodeUri);
   for (var i = arguments.length - 1; i >= 0; i -= 1) {
-    var value = arguments[i];
+    var value = recon(arguments[i]);
     this.state.unshift(value);
     var body = recon.concat(recon({'@insert': recon({index: 0})}), value);
     var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
@@ -1337,7 +1341,7 @@ ListDownlink.prototype.splice = function () {
   }
   for (i = 2, n = arguments.length; i < n; i += 1) {
     var index = start + i - 2;
-    value = arguments[i];
+    value = recon(arguments[i]);
     this.state.splice(index, 0, value);
     body = recon.concat(recon({'@insert': recon({index: index})}), value);
     message = new proto.CommandMessage(nodeUri, this.laneUri, body);
@@ -1471,6 +1475,7 @@ MapDownlink.prototype.get = function (key) {
   }
 };
 MapDownlink.prototype.set = function (key, value) {
+  value = recon(value !== undefined ? value : this.get(key));
   if (typeof key === 'string') {
     this.table[key] = value;
   }

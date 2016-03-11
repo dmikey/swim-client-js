@@ -61,7 +61,7 @@ function builtScripts() {
   generatedConfig();
   validatedSources();
   return browserify({
-      standalone: 'swim.client',
+      standalone: 'swim',
       debug: devel || !debug
     })
     .require(main, {expose: 'swim-client-js'})

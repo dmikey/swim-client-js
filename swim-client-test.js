@@ -1154,6 +1154,28 @@ describe('LaneScope', function () {
 });
 
 
+describe('Downlink', function () {
+  initSuite(this);
+
+  it('should send a command through a downlink', function (done) {
+    test.receive = function (message) {
+      if (message.isCommandMessage) {
+        assert.equal(message.node, 'chat/public');
+        assert.equal(message.lane, 'chat/room');
+        assert.equal(message.body, 'test');
+        done();
+      }
+    };
+    var downlink = test.client.downlink()
+      .host(test.hostUri)
+      .node('chat/public')
+      .lane('chat/room')
+      .link();
+    downlink.command('test');
+  });
+});
+
+
 describe('ListDownlink', function () {
   initSuite(this);
 
