@@ -2,6 +2,13 @@
 
 [![Build Status](https://travis-ci.org/swimit/swim-client-js.svg?branch=master)](https://travis-ci.org/swimit/swim-client-js) [![Coverage Status](https://coveralls.io/repos/swimit/swim-client-js/badge.svg?branch=master)](https://coveralls.io/r/swimit/swim-client-js?branch=master)
 
+The Swim JavaScript client makes it easy to build web apps that connect
+seamlessly to ultra responsive, highly scalable
+[Swim services](https://github.com/swimit/swim) running in the cloud.
+
+To get started writing reactive Swim services, check out the
+[SwimJS](https://github.com/swimit/swimjs) server runtime.
+
 ## JavaScript Library
 
 The Swim client library can run in any standard JavaScript environment.
@@ -49,15 +56,15 @@ var client = swim.client();
 
 #### client.authorize(hostUri, credentials)
 
-Authorizes all connections to `hostUri` through this `client` using the
-provided `credentials` object.  `credentials` might contain, for example,
-a [Google Sign-In ID token](https://developers.google.com/identity/sign-in/web/).
+Authorizes all connections to `hostUri` through `client` with the provided
+`credentials` object.  `credentials` might contain, for example, a
+[Google Sign-In ID token](https://developers.google.com/identity/sign-in/web/).
 Note that connections to public hosts may not require authorization.
 
 #### client.downlink()
 
-Returns a new [DownlinkBuilder](#downlinkbuilder), which is used to establish
-a new link to a lane of some remote node.
+Returns a new [DownlinkBuilder](#downlinkbuilder), used to establish a new
+link to a lane of some remote node.
 
 #### client.link([hostUri, ]nodeUri, laneUri[, options])
 
@@ -124,31 +131,35 @@ map lane.
 
 #### client.command([hostUri, ]nodeUri, laneUri, body)
 
-Sends a command to a lane of a remote node.  If provided, `hostUri` specifies
-the network endpoint to connect to, otherwise `nodeUri` must include a network
-authority component.  `body` can be any JSON-compatible object; `body` is
-serialized as [RECON](https://github.com/swimit/recon-js).
+Sends a command to a lane of a remote service.  If provided, `hostUri`
+specifies the network endpoint of the service to command, otherwise `nodeUri`
+must itself contain a network authority component.  `nodeUri` identifies the
+particular service instance to command.  `body` is the command to send, and
+can be any JSON-compatible object; `body` is serialized as a
+[RECON](https://github.com/swimit/recon-js) structure.
 
 #### client.host(hostUri)
 
-Returns a new [HostScope](#hostscope) object bound to the given `hostUri`.
+Returns a new [HostScope](#hostscope) object bound to the endpoint at the
+given `hostUri`.
 
 #### client.node([hostUri, ]nodeUri)
 
-Returns a new [NodeScope](#nodescope) object bound to the given `nodeUri`.  If
-provided, `hostUri` specifies the network endpoint to connect to, otherwise
-`nodeUri` must include a network authority component.
+Returns a new [NodeScope](#nodescope) object bound to the service at the given
+`nodeUri`.  If provided, `hostUri` specifies the network endpoint to connect
+to, otherwise `nodeUri` must contain a network authority component.
 
 #### client.lane([hostUri, ]nodeUri, laneUri)
 
 Returns a new [LaneScope](#lanescope) object bound to the given `laneUri` of
-the given `nodeUri`.  If provided, `hostUri` specifies the network endpoint to
-connect to, otherwise `nodeUri` must include a network authority component.
+the service at the given `nodeUri`.  If provided, `hostUri` specifies the
+network endpoint to connect to, otherwise `nodeUri` must contain a network
+authority component.
 
 #### client.close()
 
 Unlinks all downlinks, and closes all network connections, associated with
-the client connection pool.
+the `client` connection pool.
 
 ### Client Callbacks
 
@@ -275,7 +286,7 @@ authorization request.
 
 #### host.hostUri
 
-Returns the URI of the remote host to which the scope is bound.
+Returns the URI of the network endpoint to which the scope is bound.
 
 #### host.authorize(credentials)
 
