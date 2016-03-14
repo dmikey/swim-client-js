@@ -846,82 +846,102 @@ function DownlinkBuilder(channel, scope) {
   this.options = {};
 }
 DownlinkBuilder.prototype.host = function (hostUri) {
+  if (!arguments.length) return this.hostUri;
   this.hostUri = hostUri;
   return this;
 };
 DownlinkBuilder.prototype.node = function (nodeUri) {
+  if (!arguments.length) return this.nodeUri;
   this.nodeUri = nodeUri;
   return this;
 };
 DownlinkBuilder.prototype.lane = function (laneUri) {
+  if (!arguments.length) return this.laneUri;
   this.laneUri = laneUri;
   return this;
 };
 DownlinkBuilder.prototype.prio = function (prio) {
+  if (!arguments.length) return this.options.prio;
   this.options.prio = prio;
   return this;
 };
-DownlinkBuilder.prototype.keepAlive = function () {
-  this.options.keepAlive = true;
+DownlinkBuilder.prototype.keepAlive = function (keepAlive) {
+  if (!arguments.length) return this.options.keepAlive;
+  this.options.keepAlive = keepAlive;
   return this;
 };
 DownlinkBuilder.prototype.delegate = function (delegate) {
+  if (!arguments.length) return this.options.delegate;
   this.options.delegate = delegate;
   return this;
 };
 DownlinkBuilder.prototype.onEvent = function (callback) {
+  if (!arguments.length) return this.proxy.onEvent;
   this.proxy.onEvent = callback;
   return this;
 };
 DownlinkBuilder.prototype.onCommand = function (callback) {
+  if (!arguments.length) return this.proxy.onCommand;
   this.proxy.onCommand = callback;
   return this;
 };
 DownlinkBuilder.prototype.onLink = function (callback) {
+  if (!arguments.length) return this.proxy.onLink;
   this.proxy.onLink = callback;
   return this;
 };
 DownlinkBuilder.prototype.onLinked = function (callback) {
+  if (!arguments.length) return this.proxy.onLinked;
   this.proxy.onLinked = callback;
   return this;
 };
 DownlinkBuilder.prototype.onSync = function (callback) {
+  if (!arguments.length) return this.proxy.onSync;
   this.proxy.onSync = callback;
   return this;
 };
 DownlinkBuilder.prototype.onSynced = function (callback) {
+  if (!arguments.length) return this.proxy.onSynced;
   this.proxy.onSynced = callback;
   return this;
 };
 DownlinkBuilder.prototype.onUnlink = function (callback) {
+  if (!arguments.length) return this.proxy.onUnlink;
   this.proxy.onUnlink = callback;
   return this;
 };
 DownlinkBuilder.prototype.onUnlinked = function (callback) {
+  if (!arguments.length) return this.proxy.onUnlinked;
   this.proxy.onUnlinked = callback;
   return this;
 };
 DownlinkBuilder.prototype.onConnect = function (callback) {
+  if (!arguments.length) return this.proxy.onConnect;
   this.proxy.onConnect = callback;
   return this;
 };
 DownlinkBuilder.prototype.onDisconnect = function (callback) {
+  if (!arguments.length) return this.proxy.onDisconnect;
   this.proxy.onDisconnect = callback;
   return this;
 };
 DownlinkBuilder.prototype.onError = function (callback) {
+  if (!arguments.length) return this.proxy.onError;
   this.proxy.onError = callback;
   return this;
 };
 DownlinkBuilder.prototype.onClose = function (callback) {
+  if (!arguments.length) return this.proxy.onClose;
   this.proxy.onClose = callback;
   return this;
 };
 DownlinkBuilder.prototype.primaryKey = function (primaryKey) {
+  if (!arguments.length) return this.options.primaryKey;
   this.options.primaryKey = primaryKey;
   return this;
 };
 DownlinkBuilder.prototype.sortBy = function (sortBy) {
+  if (!arguments.length) return this.options.sortBy;
   this.options.sortBy = sortBy;
   return this;
 };
@@ -1657,5 +1677,17 @@ swim.client = function (options) {
   return new Client(options);
 };
 swim.config = config;
+swim.Client = Client;
+swim.Scope = Scope;
+swim.HostScope = HostScope;
+swim.NodeScope = NodeScope;
+swim.LaneScope = LaneScope;
+swim.Channel = Channel;
+swim.DownlinkBuilder = DownlinkBuilder;
+swim.Downlink = Downlink;
+swim.LinkedDownlink = LinkedDownlink;
+swim.SyncedDownlink = SyncedDownlink;
+swim.ListDownlink = ListDownlink;
+swim.MapDownlink = MapDownlink;
 
 module.exports = swim;

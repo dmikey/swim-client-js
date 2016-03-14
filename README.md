@@ -779,9 +779,9 @@ Sets the lane URI of the downlink to create and returns `this`.
 
 Sets the priority of the downlink to create and returns `this`.
 
-#### builder.keepAlive()
+#### builder.keepAlive(keepAlive)
 
-Sets the keep-alive mode of the downlink to create to `true` and returns `this`.
+Sets the boolean keep-alive mode of the downlink to create and returns `this`.
 
 #### builder.delegate(delegate)
 

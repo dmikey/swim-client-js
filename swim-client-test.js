@@ -149,7 +149,7 @@ describe('Client', function () {
       .node('house/kitchen#light')
       .lane('light/on')
       .prio(0.5)
-      .keepAlive()
+      .keepAlive(true)
       .link();
     assert.equal(downlink.hostUri, test.hostUri);
     assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
@@ -478,7 +478,7 @@ describe('HostScope', function () {
       .node('house/kitchen#light')
       .lane('light/on')
       .prio(0.5)
-      .keepAlive()
+      .keepAlive(true)
       .link();
     assert.equal(downlink.hostUri, test.hostUri);
     assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
@@ -751,7 +751,7 @@ describe('NodeScope', function () {
     var downlink = node.downlink()
       .lane('light/on')
       .prio(0.5)
-      .keepAlive()
+      .keepAlive(true)
       .link();
     assert.equal(downlink.hostUri, test.hostUri);
     assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
@@ -1028,7 +1028,7 @@ describe('LaneScope', function () {
     var lane = test.client.lane(test.hostUri, 'house/kitchen#light', 'light/on');
     var downlink = lane.downlink()
       .prio(0.5)
-      .keepAlive()
+      .keepAlive(true)
       .link();
     assert.equal(downlink.hostUri, test.hostUri);
     assert.equal(downlink.nodeUri, test.resolve('house/kitchen#light'));
@@ -2131,6 +2131,81 @@ describe('MapDownlink', function () {
 describe('DownlinkBuilder', function () {
   initSuite(this);
 
+  it('should have unconfigured builder properties', function () {
+    var builder = test.client.downlink();
+    assert.equal(builder.host(), undefined);
+    assert.equal(builder.node(), undefined);
+    assert.equal(builder.lane(), undefined);
+    assert.equal(builder.prio(), undefined);
+    assert.equal(builder.keepAlive(), undefined);
+    assert.equal(builder.delegate(), undefined);
+    assert.equal(builder.onEvent(), undefined);
+    assert.equal(builder.onCommand(), undefined);
+    assert.equal(builder.onLink(), undefined);
+    assert.equal(builder.onLinked(), undefined);
+    assert.equal(builder.onSync(), undefined);
+    assert.equal(builder.onSynced(), undefined);
+    assert.equal(builder.onUnlink(), undefined);
+    assert.equal(builder.onUnlinked(), undefined);
+    assert.equal(builder.onConnect(), undefined);
+    assert.equal(builder.onDisconnect(), undefined);
+    assert.equal(builder.onError(), undefined);
+    assert.equal(builder.onClose(), undefined);
+  });
+
+  it('should have configured builder properties', function () {
+    var delegate = {};
+    function onEvent(message) {}
+    function onCommand(message) {}
+    function onLink(request) {}
+    function onLinked(response) {}
+    function onSync(request) {}
+    function onSynced(response) {}
+    function onUnlink(request) {}
+    function onUnlinked(response) {}
+    function onConnect() {}
+    function onDisconnect() {}
+    function onError() {}
+    function onClose() {}
+    var builder = test.client.downlink()
+      .host(test.hostUri)
+      .node('house/kitchen#light')
+      .lane('light/on')
+      .prio(0.5)
+      .keepAlive(true)
+      .delegate(delegate)
+      .onEvent(onEvent)
+      .onCommand(onCommand)
+      .onLink(onLink)
+      .onLinked(onLinked)
+      .onSync(onSync)
+      .onSynced(onSynced)
+      .onUnlink(onUnlink)
+      .onUnlinked(onUnlinked)
+      .onConnect(onConnect)
+      .onDisconnect(onDisconnect)
+      .onError(onError)
+      .onClose(onClose);
+    assert.equal(builder.host(), test.hostUri);
+    assert.equal(builder.node(), 'house/kitchen#light');
+    assert.equal(builder.lane(), 'light/on');
+    assert.equal(builder.prio(), 0.5);
+    assert.equal(builder.keepAlive(), true);
+    assert.equal(builder.delegate(), delegate);
+    assert.equal(builder.onEvent(), onEvent);
+    assert.equal(builder.onCommand(), onCommand);
+    assert.equal(builder.onLink(), onLink);
+    assert.equal(builder.onLinked(), onLinked);
+    assert.equal(builder.onSync(), onSync);
+    assert.equal(builder.onSynced(), onSynced);
+    assert.equal(builder.onUnlink(), onUnlink);
+    assert.equal(builder.onUnlinked(), onUnlinked);
+    assert.equal(builder.onConnect(), onConnect);
+    assert.equal(builder.onDisconnect(), onDisconnect);
+    assert.equal(builder.onError(), onError);
+    assert.equal(builder.onClose(), onClose);
+  });
+
   it('should build a minimally configured downlink', function () {
     var downlink = test.client.downlink()
       .node(test.resolve('house/kitchen#light'))
@@ -2174,7 +2249,7 @@ describe('DownlinkBuilder', function () {
       .node('house/kitchen#light')
       .lane('light/on')
       .prio(0.5)
-      .keepAlive()
+      .keepAlive(true)
       .onEvent(onEvent)
       .onCommand(onCommand)
       .onLink(onLink)
