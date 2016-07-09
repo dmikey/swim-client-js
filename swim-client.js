@@ -404,11 +404,15 @@ function Channel(client, hostUri, options) {
   Object.defineProperty(this, 'uriCache', {value: new UriCache(hostUri), configurable: true});
   Object.defineProperty(this, 'delegates', {value: [], configurable: true});
   Object.defineProperty(this, 'downlinks', {value: {}, configurable: true});
-  Object.defineProperty(this, 'sendBuffer', {value: [], configurable: true});
+  Object.defineProperty(this, 'commandQueue', {value: [], configurable: true});
+  Object.defineProperty(this, 'sendQueue', {value: [], configurable: true});
   Object.defineProperty(this, 'reconnectTimer', {value: null, writable: true});
   Object.defineProperty(this, 'reconnectTimeout', {value: 0, writable: true});
+  Object.defineProperty(this, 'backpressureTimer', {value: null, writable: true});
   Object.defineProperty(this, 'idleTimer', {value: null, writable: true});
   Object.defineProperty(this, 'socket', {value: null, writable: true});
+  Object.defineProperty(this, 'checkBackpressure', {value: this.checkBackpressure.bind(this), configurable: true});
+  Object.defineProperty(this, 'checkIdle', {value: this.checkIdle.bind(this), configurable: true});
 }
 Object.defineProperty(Channel.prototype, 'protocols', {
   get: function () {
@@ -420,14 +424,24 @@ Object.defineProperty(Channel.prototype, 'maxReconnectTimeout', {
     return this.options.maxReconnectTimeout || 30000;
   }
 });
+Object.defineProperty(Channel.prototype, 'backpressureTimeout', {
+  get: function () {
+    return this.options.backpressureTimeout || 100;
+  }
+});
 Object.defineProperty(Channel.prototype, 'idleTimeout', {
   get: function () {
     return this.options.idleTimeout || 1000;
   }
 });
+Object.defineProperty(Channel.prototype, 'commandQueueLength', {
+  get: function () {
+    return this.options.commandQueueLength || 1024;
+  }
+});
 Object.defineProperty(Channel.prototype, 'sendBufferSize', {
   get: function () {
-    return this.options.sendBufferSize || 1024;
+    return this.options.sendBufferSize || 32768;
   }
 });
 Object.defineProperty(Channel.prototype, 'isConnected', {
@@ -727,6 +741,7 @@ Channel.prototype.open = function () {
 };
 Channel.prototype.close = function () {
   this.clearReconnect();
+  this.clearBackpressure();
   this.clearIdle();
   if (this.socket) {
     this.socket.close();
@@ -763,6 +778,32 @@ Channel.prototype.clearReconnect = function () {
     this.reconnectTimeout = 0;
   }
 };
+Channel.prototype.clearBackpressure = function () {
+  if (this.backpressureTimer) {
+    clearTimeout(this.backpressureTimer);
+    this.backpressureTimer = null;
+  }
+};
+Channel.prototype.watchBackpressure = function () {
+  if (!this.backpressureTimer) {
+    console.log('watching backpressure');
+    this.backpressureTimer = setTimeout(this.checkBackpressure, this.backpressureTimeout);
+  }
+};
+Channel.prototype.checkBackpressure = function () {
+  console.log('checking backpressure');
+  if (this.isConnected) {
+    this.backpressureTimer = null;
+    this.drainSendQueue();
+    if (this.sendQueue.length > 0) {
+      console.log('partially drained bufferedAmount: ' + this.socket.bufferedAmount);
+      this.backpressureTimer = setTimeout(this.checkBackpressure, this.backpressureTimeout);
+    } else {
+      console.log('fully drained buffer');
+      this.watchIdle();
+    }
+  }
+};
 Channel.prototype.clearIdle = function () {
   if (this.idleTimer) {
     clearTimeout(this.idleTimer);
@@ -770,24 +811,44 @@ Channel.prototype.clearIdle = function () {
   }
 };
 Channel.prototype.watchIdle = function () {
-  if (this.isConnected && this.sendBuffer.length === 0 && Object.keys(this.downlinks).length === 0) {
-    this.idleTimer = setTimeout(this.checkIdle.bind(this), this.idleTimeout);
+  if (this.isConnected && this.commandQueue.length === 0 && Object.keys(this.downlinks).length === 0) {
+    this.idleTimer = setTimeout(this.checkIdle, this.idleTimeout);
   }
 };
 Channel.prototype.checkIdle = function () {
-  if (this.sendBuffer.length === 0 && Object.keys(this.downlinks).length === 0) {
+  if (this.commandQueue.length === 0 && Object.keys(this.downlinks).length === 0) {
     this.close();
+  }
+};
+Channel.prototype.drainCommandQueue = function () {
+  var envelope;
+  while ((envelope = this.commandQueue.shift())) {
+    this.push(envelope);
+  }
+};
+Channel.prototype.drainSendQueue = function () {
+  var envelope;
+  while (this.socket.bufferedAmount < this.sendBufferSize && (envelope = this.sendQueue.shift())) {
+    var text = proto.stringify(envelope);
+    this.socket.send(text);
   }
 };
 Channel.prototype.push = function (envelope) {
   if (this.isConnected) {
     this.clearIdle();
-    var text = proto.stringify(envelope);
-    this.socket.send(text);
-    this.watchIdle();
+    this.drainSendQueue();
+    if (this.socket.bufferedAmount < this.sendBufferSize) {
+      var text = proto.stringify(envelope);
+      this.socket.send(text);
+      this.watchIdle();
+    } else {
+      console.log('BACKPRESSURE: ' + this.socket.bufferedAmount);
+      this.sendQueue.push(envelope);
+      this.watchBackpressure();
+    }
   } else if (envelope.isCommandMessage) {
-    if (this.sendBuffer.length < this.sendBufferSize) {
-      this.sendBuffer.push(envelope);
+    if (this.commandQueue.length < this.commandQueueLength) {
+      this.commandQueue.push(envelope);
     } else {
       // TODO
     }
@@ -800,10 +861,7 @@ Channel.prototype.onWebSocketOpen = function () {
     this.push(request);
   }
   this.onConnect();
-  var envelope;
-  while ((envelope = this.sendBuffer.shift())) {
-    this.push(envelope);
-  }
+  this.drainCommandQueue();
   this.watchIdle();
 };
 Channel.prototype.onWebSocketMessage = function (message) {
@@ -817,6 +875,7 @@ Channel.prototype.onWebSocketMessage = function (message) {
 };
 Channel.prototype.onWebSocketError = function () {
   this.onError();
+  this.clearBackpressure();
   this.clearIdle();
   if (this.socket) {
     this.socket.onopen = null;
@@ -832,8 +891,15 @@ Channel.prototype.onWebSocketClose = function () {
   this.session = null;
   this.socket = null;
   this.onDisconnect();
+  this.clearBackpressure();
   this.clearIdle();
-  if (this.sendBuffer.length > 0 || Object.keys(this.downlinks).length > 0) {
+  var envelope;
+  while ((envelope = this.sendQueue.shift())) {
+    if (envelope.isCommandMessage) {
+      this.commandQueue.push(envelope);
+    }
+  }
+  if (this.commandQueue.length > 0 || Object.keys(this.downlinks).length > 0) {
     this.reconnect();
   }
 };

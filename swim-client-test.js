@@ -2618,4 +2618,18 @@ describe('Channel', function () {
       test.client.command(test.resolve('house/kitchen#light'), 'light/on');
     }
   });
+
+  it('should limit the size of the websocket send buffer', function (done) {
+    // NOTE: Not all WebSocket implementations expose bufferedAmount.
+    var receiveCount = 0;
+    test.receive = function (message) {
+      receiveCount += 1;
+      assert.equal(message.body['@audio'].length, 8192);
+      if (receiveCount === 8) done();
+    };
+    for (var i = 0; i < 8; i += 1) {
+      var data = [{'@audio': new Uint8Array(8192)}];
+      test.client.command(test.resolve('house/kitchen'), 'light/audio', data);
+    }
+  });
 });

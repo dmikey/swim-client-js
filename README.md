@@ -44,7 +44,11 @@ Returns a [Client](#client) object, which represents a dedicated connection pool
   reconnect attempts after exponential backoff.  Defaults to 30 seconds.
 - `options.idleTimeout`: number of milliseconds to wait before closing a
   connection with no active links.  Defaults to 1 second.
-- `options.sendBufferSize`: maximum number of commands to buffer while waiting
+- `options.backpressureTimeout`: number of milliseconds to wait before checking
+  a connection with a full send buffer.  Defaults to 100 milliseconds.
+- `options.sendBufferSize`: number of bytes in a connection's send buffer above
+  which to trigger a backpressure timeout.  Defaults to 32kB.
+- `options.commandQueueLength`: maximum number of commands to buffer while waiting
   for the network.  Defaults to 1,024 messages.
 
 ```js
