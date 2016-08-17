@@ -1397,20 +1397,29 @@ MapDownlink.prototype = Object.create(SyncedDownlink.prototype);
 MapDownlink.prototype.constructor = MapDownlink;
 Object.defineProperty(MapDownlink.prototype, 'onEventMessage', {
   value: function (message) {
-    var key;
     var tag = recon.tag(message.body);
-    if (tag === '@remove' || tag === '@delete') {
-      var body = recon.tail(message.body);
-      key = this.primaryKey(body);
+    var head, key, value;
+    if (tag === '@update') {
+      head = recon.head(message.body);
+      key = recon.get(head, 'key');
+      value = recon.tail(message.body);
+      this.remoteSet(key, value);
+    } else if (tag === '@remove' || tag === '@delete') {
+      head = recon.head(message.body);
+      key = recon.get(head, 'key');
+      if (key === undefined && this.primaryKey) {
+        key = this.primaryKey(message.body);
+      }
       if (key !== undefined) {
         this.remoteDelete(key);
       }
     } else if (tag === '@clear' && recon.size(message.body) === 1) {
       this.remoteClear();
-    } else {
-      key = this.primaryKey(message.body);
+    } else if (this.primaryKey) {
+      value = message.body;
+      key = this.primaryKey(value);
       if (key !== undefined) {
-        this.remoteSet(key, message.body);
+        this.remoteSet(key, value);
       }
     }
     SyncedDownlink.prototype.onEventMessage.call(this, message);
@@ -1419,13 +1428,12 @@ Object.defineProperty(MapDownlink.prototype, 'onEventMessage', {
 });
 Object.defineProperty(MapDownlink.prototype, 'remoteSet', {
   value: function (key, value) {
+    Object.defineProperty(value, '$key', {value: key, configurable: true});
     if (typeof key === 'string') {
       this.table[key] = value;
     }
     for (var i = 0, n = this.state.length; i < n; i += 1) {
-      var oldValue = this.state[i];
-      var id = this.primaryKey(oldValue);
-      if (recon.equal(key, id)) {
+      if (recon.equal(key, this.state[i].$key)) {
         this.state[i] = value;
         break;
       }
@@ -1443,9 +1451,7 @@ Object.defineProperty(MapDownlink.prototype, 'remoteDelete', {
       delete this.table[key];
     }
     for (var i = 0, n = this.state.length; i < n; i += 1) {
-      var value = this.state[i];
-      var id = this.primaryKey(value);
-      if (recon.equal(key, id)) {
+      if (recon.equal(key, this.state[i].$key)) {
         this.state.splice(i, 1);
         return;
       }
@@ -1472,9 +1478,7 @@ MapDownlink.prototype.has = function (key) {
     return this.table[key] !== undefined;
   } else {
     for (var i = 0, n = this.state.length; i < n; i += 1) {
-      var value = this.state[i];
-      var id = this.primaryKey(value);
-      if (recon.equal(key, id)) {
+      if (recon.equal(key, this.state[i].$key)) {
         return true;
       }
     }
@@ -1487,8 +1491,7 @@ MapDownlink.prototype.get = function (key) {
   } else {
     for (var i = 0, n = this.state.length; i < n; i += 1) {
       var value = this.state[i];
-      var id = this.primaryKey(value);
-      if (recon.equal(key, id)) {
+      if (recon.equal(key, value.$key)) {
         return value;
       }
     }
@@ -1496,13 +1499,14 @@ MapDownlink.prototype.get = function (key) {
 };
 MapDownlink.prototype.set = function (key, value) {
   value = recon(value !== undefined ? value : this.get(key));
+  Object.defineProperty(value, '$key', {value: key, configurable: true});
   if (typeof key === 'string') {
     this.table[key] = value;
   }
+  var oldValue;
   for (var i = 0, n = this.state.length; i < n; i += 1) {
-    var oldValue = this.state[i];
-    var id = this.primaryKey(oldValue);
-    if (recon.equal(key, id)) {
+    if (recon.equal(key, this.state[i].$key)) {
+      oldValue = this.state[i];
       this.state[i] = value;
       break;
     }
@@ -1511,10 +1515,18 @@ MapDownlink.prototype.set = function (key, value) {
     this.state.push(value);
   }
   this.sort();
-  var nodeUri = this.channel.unresolve(this.nodeUri);
-  var message = new proto.CommandMessage(nodeUri, this.laneUri, value);
-  this.onCommandMessage(message);
-  this.channel.push(message);
+  if (!recon.equal(value, oldValue)) {
+    var nodeUri = this.channel.unresolve(this.nodeUri);
+    var body;
+    if (this.primaryKey) {
+      body = recon(value);
+    } else {
+      body = recon.concat(recon({'@update': {key: key}}), recon(value));
+    }
+    var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
+    this.onCommandMessage(message);
+    this.channel.push(message);
+  }
   return this;
 };
 MapDownlink.prototype.delete = function (key) {
@@ -1523,11 +1535,15 @@ MapDownlink.prototype.delete = function (key) {
   }
   for (var i = 0, n = this.state.length; i < n; i += 1) {
     var value = this.state[i];
-    var id = this.primaryKey(value);
-    if (recon.equal(key, id)) {
+    if (recon.equal(key, value.$key)) {
       this.state.splice(i, 1);
       var nodeUri = this.channel.unresolve(this.nodeUri);
-      var body = recon.concat(recon({'@remove': null}), value);
+      var body;
+      if (this.primaryKey) {
+        body = recon.concat(recon({'@remove': null}), value);
+      } else {
+        body = recon({'@remove': {key: key}});
+      }
       var message = new proto.CommandMessage(nodeUri, this.laneUri, body);
       this.onCommandMessage(message);
       this.channel.push(message);
@@ -1553,8 +1569,7 @@ MapDownlink.prototype.sort = function () {
 MapDownlink.prototype.keys = function () {
   var keys = [];
   for (var i = 0, n = this.state.length; i < n; i += 1) {
-    var value = this.state[i];
-    var key = this.primaryKey(value);
+    var key = this.state[i].$key;
     if (key !== undefined) {
       keys.push(key);
     }
@@ -1567,7 +1582,8 @@ MapDownlink.prototype.values = function () {
 MapDownlink.prototype.forEach = function (callback, thisArg) {
   for (var i = 0, n = this.state.length; i < n; i += 1) {
     var value = this.state[i];
-    callback.call(thisArg, value, this);
+    var key = value.$key;
+    callback.call(thisArg, value, key, this);
   }
 };
 MapDownlink.primaryKeyOption = function (options) {
@@ -1583,10 +1599,9 @@ MapDownlink.primaryKeyOption = function (options) {
       return value;
     };
   } else {
-    return MapDownlink.identityKey;
+    return undefined;
   }
 };
-MapDownlink.identityKey = function (value) { return value; };
 MapDownlink.sortByOption = function (options) {
   if (typeof options.sortBy === 'function') {
     return options.sortBy;

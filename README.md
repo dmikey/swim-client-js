@@ -115,9 +115,6 @@ remote ordered list lane.
 Returns a [MapDownlink](#mapdownlink) that synchronizes its state with a remote
 map lane.
 
-- `options.primaryKey`: function that derives keys from message values, or a
-  dot-notation string that specifies the path of the primary key.  Defaults to
-  the identity function.
 - `options.sortBy`: function with which to sort downlinked map state, or a
   dot-notation string that specifies the path of a value to sort by.  Defaults
   to `undefined`, which leaves the downlinked map state unsorted.
@@ -745,13 +742,10 @@ Returns an array of all values in the downlinked map state.
 Invokes `callback` for every value in the downlinked map state.  If provided,
 `thisArg` will be passed to each invocation of `callback` for use as its `this` value.
 
-`callback` is invoked with two arguments:
+`callback` is invoked with three arguments:
 - the map value
+- the map key
 - the `mapDownlink` being traversed
-
-#### mapDownlink.primaryKey
-
-Returns the primary key function used to derive keys from messages.
 
 #### mapDownlink.sortBy
 
@@ -834,11 +828,6 @@ Sets the `onError` callback of the downlink to create and returns `this`.
 #### builder.onClose(callback)
 
 Sets the `onClose` callback of the downlink to create and returns `this`.
-
-#### builder.primaryKey(function)
-
-Sets the `primaryKey` function option of the synchronized map downlink to
-create and returns `this`.
 
 #### builder.sortBy(function)
 

@@ -1715,43 +1715,25 @@ describe('MapDownlink', function () {
     assert.same(downlink.state, []);
   });
 
-  it('should sync a map lane with a primaryKey function', function (done) {
+  it('should sync a map lane', function (done) {
     test.receive = function (request) {
       assert(request.isSyncRequest);
       test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
-      test.send(new proto.SyncedResponse(request.node, request.lane));
-    };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: function (user) { return recon.get(user, 'id'); }
-    });
-    downlink.onSynced = function (response) {
-      assert.same(downlink.size, 2);
-      assert(downlink.has('a'));
-      assert(downlink.has('b'));
-      assert(!downlink.has('c'));
-      assert.same(downlink.get('a'), [{id: 'a'}, {name: 'foo'}]);
-      assert.same(downlink.get('b'), [{id: 'b'}, {name: 'bar'}]);
-      assert.same(downlink.get('c'), undefined);
-      assert.same(downlink.keys(), ['a', 'b']);
-      assert.same(downlink.values(), [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
-      done();
-    };
-  });
-
-  it('should sync a map lane with no primary key', function (done) {
-    test.receive = function (request) {
-      assert(request.isSyncRequest);
-      test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
       test.send(new proto.SyncedResponse(request.node, request.lane));
     };
     var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     downlink.onSynced = function (response) {
       assert.same(downlink.size, 2);
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'a'}, {name: 'bar'}]]);
+      assert(downlink.has('a'));
+      assert(downlink.has('b'));
+      assert(!downlink.has('c'));
+      assert.same(downlink.get('a'), [{name: 'foo'}]);
+      assert.same(downlink.get('b'), [{name: 'bar'}]);
+      assert.same(downlink.get('c'), undefined);
+      assert.same(downlink.keys(), ['a', 'b']);
+      assert.same(downlink.values(), [[{name: 'foo'}], [{name: 'bar'}]]);
       done();
     };
   });
@@ -1761,20 +1743,18 @@ describe('MapDownlink', function () {
       assert(request.isSyncRequest);
       test.send(new proto.LinkedResponse(request.node, request.lane));
       test.send(new proto.EventMessage(request.node, request.lane,
-        [{id: 9}, {name: 'nine'}]));
+        [{'@update': {key: 9}}, {name: 'nine'}]));
       test.send(new proto.EventMessage(request.node, request.lane,
-        [{id: 4}, {name: 'four'}]));
+        [{'@update': {key: 4}}, {name: 'four'}]));
       test.send(new proto.SyncedResponse(request.node, request.lane));
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     downlink.onSynced = function (response) {
       assert(downlink.has(9));
       assert(downlink.has(4));
       assert(!downlink.has(3));
-      assert.same(downlink.get(9), [{id: 9}, {name: 'nine'}]);
-      assert.same(downlink.get(4), [{id: 4}, {name: 'four'}]);
+      assert.same(downlink.get(9), [{name: 'nine'}]);
+      assert.same(downlink.get(4), [{name: 'four'}]);
       assert.same(downlink.get(3), undefined);
       done();
     };
@@ -1784,18 +1764,17 @@ describe('MapDownlink', function () {
     test.receive = function (request) {
       assert(request.isSyncRequest);
       test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
       test.send(new proto.SyncedResponse(request.node, request.lane));
     };
     var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id',
       sortBy: function (x, y) {
         return recon.compare(recon.get(x, 'name'), recon.get(y, 'name'));
       }
     });
     downlink.onSynced = function (response) {
-      assert.same(downlink.state, [[{id: 'b'}, {name: 'bar'}], [{id: 'a'}, {name: 'foo'}]]);
+      assert.same(downlink.state, [[{name: 'bar'}], [{name: 'foo'}]]);
       done();
     };
   });
@@ -1804,16 +1783,15 @@ describe('MapDownlink', function () {
     test.receive = function (request) {
       assert(request.isSyncRequest);
       test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
       test.send(new proto.SyncedResponse(request.node, request.lane));
     };
     var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id',
       sortBy: 'name'
     });
     downlink.onSynced = function (response) {
-      assert.same(downlink.state, [[{id: 'b'}, {name: 'bar'}], [{id: 'a'}, {name: 'foo'}]]);
+      assert.same(downlink.state, [[{name: 'bar'}], [{name: 'foo'}]]);
       done();
     };
   });
@@ -1822,30 +1800,28 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
         test.send(new proto.EventMessage(message.node, message.lane, message.body));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}]]);
-      downlink.set('b', [{id: 'b'}, {name: 'bar'}]);
+      assert.same(downlink.state, [[{name: 'foo'}]]);
+      downlink.set('b', [{name: 'bar'}]);
     };
     downlink.onCommand = function (message) {
       assert.equal(state, 1);
       state = 2;
-      assert.same(message.body, [{id: 'b'}, {name: 'bar'}]);
+      assert.same(message.body, [{'@update': [{key: 'b'}]}, {name: 'bar'}]);
     };
     downlink.onEvent = function (message) {
       if (state === 2) {
-        assert.same(downlink.get('b'), [{id: 'b'}, {name: 'bar'}]);
+        assert.same(downlink.get('b'), [{name: 'bar'}]);
         done();
       }
     };
@@ -1855,30 +1831,28 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 9}, {name: 'nine'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 9}}, {name: 'nine'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
         test.send(new proto.EventMessage(message.node, message.lane, message.body));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 9}, {name: 'nine'}]]);
-      downlink.set(4, [{id: 4}, {name: 'four'}]);
+      assert.same(downlink.state, [[{name: 'nine'}]]);
+      downlink.set(4, [{name: 'four'}]);
     };
     downlink.onCommand = function (message) {
       assert.equal(state, 1);
       state = 2;
-      assert.same(message.body, [{id: 4}, {name: 'four'}]);
+      assert.same(message.body, [{'@update': [{key: 4}]}, {name: 'four'}]);
     };
     downlink.onEvent = function (message) {
       if (state === 2) {
-        assert.same(downlink.get(4), [{id: 4}, {name: 'four'}]);
+        assert.same(downlink.get(4), [{name: 'four'}]);
         done();
       }
     };
@@ -1888,31 +1862,29 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
         test.send(new proto.EventMessage(message.node, message.lane, message.body));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
-      downlink.set('a', [{id: 'a'}, {name: 'baz'}]);
+      assert.same(downlink.state, [[{name: 'foo'}], [{name: 'bar'}]]);
+      downlink.set('a', [{name: 'baz'}]);
     };
     downlink.onCommand = function (message) {
       assert.equal(state, 1);
       state = 2;
-      assert.same(message.body, [{id: 'a'}, {name: 'baz'}]);
+      assert.same(message.body, [{'@update': [{key: 'a'}]}, {name: 'baz'}]);
     };
     downlink.onEvent = function (message) {
       if (state === 2) {
-        assert.same(downlink.get('a'), [{id: 'a'}, {name: 'baz'}]);
+        assert.same(downlink.get('a'), [{name: 'baz'}]);
         done();
       }
     };
@@ -1922,31 +1894,29 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 9}, {name: 'nine'}]));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 4}, {name: 'for'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 9}}, {name: 'nine'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 4}}, {name: 'for'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
         test.send(new proto.EventMessage(message.node, message.lane, message.body));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 9}, {name: 'nine'}], [{id: 4}, {name: 'for'}]]);
-      downlink.set(4, [{id: 4}, {name: 'four'}]);
+      assert.same(downlink.state, [[{name: 'nine'}], [{name: 'for'}]]);
+      downlink.set(4, [{name: 'four'}]);
     };
     downlink.onCommand = function (message) {
       assert.equal(state, 1);
       state = 2;
-      assert.same(message.body, [{id: 4}, {name: 'four'}]);
+      assert.same(message.body, [{'@update': [{key: 4}]}, {name: 'four'}]);
     };
     downlink.onEvent = function (message) {
       if (state === 2) {
-        assert.same(downlink.get(4), [{id: 4}, {name: 'four'}]);
+        assert.same(downlink.get(4), [{name: 'four'}]);
         done();
       }
     };
@@ -1956,35 +1926,32 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
-        test.send(new proto.EventMessage(message.node, message.lane,
-          [{'@remove': null}, {id: 'a'}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@remove': {key: 'a'}}]));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      assert.same(downlink.state, [[{name: 'foo'}], [{name: 'bar'}]]);
       downlink.delete('a');
     };
     downlink.onCommand = function (message) {
       assert.equal(state, 1);
       state = 2;
-      assert.same(message.body, [{'@remove': null}, {id: 'a'}, {name: 'foo'}]);
+      assert.same(message.body, [{'@remove': [{key: 'a'}]}]);
     };
     downlink.onEvent = function (message) {
       if (state === 2) {
         assert(!downlink.has('a'));
         assert.same(downlink.get('a'), undefined);
         downlink.forEach(function (value) {
-          assert.same(value, [{id: 'b'}, {name: 'bar'}]);
+          assert.same(value, [{name: 'bar'}]);
         });
         assert(!downlink.delete('a'));
         done();
@@ -1996,28 +1963,25 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 4}, {name: 'four'}]));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 9}, {name: 'nine'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 4}}, {name: 'four'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 9}}, {name: 'nine'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
-        test.send(new proto.EventMessage(message.node, message.lane,
-          [{'@remove': null}, {id: 9}, {name: 'nine'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@remove': {key: 9}}]));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 4}, {name: 'four'}], [{id: 9}, {name: 'nine'}]]);
+      assert.same(downlink.state, [[{name: 'four'}], [{name: 'nine'}]]);
       downlink.delete(9);
     };
     downlink.onCommand = function (message) {
       assert.equal(state, 1);
       state = 2;
-      assert.same(message.body, [{'@remove': null}, {id: 9}, {name: 'nine'}]);
+      assert.same(message.body, [{'@remove': [{key: 9}]}]);
     };
     downlink.onEvent = function (message) {
       if (state === 2) {
@@ -2033,21 +1997,19 @@ describe('MapDownlink', function () {
     test.receive = function (message) {
       if (message.isSyncRequest) {
         test.send(new proto.LinkedResponse(message.node, message.lane));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'a'}, {name: 'foo'}]));
-        test.send(new proto.EventMessage(message.node, message.lane, [{id: 'b'}, {name: 'bar'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+        test.send(new proto.EventMessage(message.node, message.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
         test.send(new proto.SyncedResponse(message.node, message.lane));
       } else if (message.isCommandMessage) {
         test.send(new proto.EventMessage(message.node, message.lane, message.body));
       }
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      assert.same(downlink.state, [[{name: 'foo'}], [{name: 'bar'}]]);
       downlink.clear();
     };
     downlink.onCommand = function (message) {
@@ -2071,20 +2033,17 @@ describe('MapDownlink', function () {
     test.receive = function (request) {
       assert(request.isSyncRequest);
       test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
       test.send(new proto.SyncedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane,
-        [{'@remove': null}, {id: 'a'}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@remove': {key: 'a'}}]));
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      assert.same(downlink.state, [[{name: 'foo'}], [{name: 'bar'}]]);
     };
     downlink.onEvent = function (message) {
       if (state === 1) {
@@ -2100,19 +2059,17 @@ describe('MapDownlink', function () {
     test.receive = function (request) {
       assert(request.isSyncRequest);
       test.send(new proto.LinkedResponse(request.node, request.lane));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'a'}, {name: 'foo'}]));
-      test.send(new proto.EventMessage(request.node, request.lane, [{id: 'b'}, {name: 'bar'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'a'}}, {name: 'foo'}]));
+      test.send(new proto.EventMessage(request.node, request.lane, [{'@update': {key: 'b'}}, {name: 'bar'}]));
       test.send(new proto.SyncedResponse(request.node, request.lane));
       test.send(new proto.EventMessage(request.node, request.lane, [{'@clear': null}]));
     };
-    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users', {
-      primaryKey: 'id'
-    });
+    var downlink = test.client.syncMap(test.hostUri, 'chat/public', 'chat/users');
     var state = 0;
     downlink.onSynced = function (response) {
       assert.equal(state, 0);
       state = 1;
-      assert.same(downlink.state, [[{id: 'a'}, {name: 'foo'}], [{id: 'b'}, {name: 'bar'}]]);
+      assert.same(downlink.state, [[{name: 'foo'}], [{name: 'bar'}]]);
     };
     downlink.onEvent = function (message) {
       if (state === 1) {
@@ -2318,16 +2275,13 @@ describe('DownlinkBuilder', function () {
   });
 
   it('should build a synchronized map downlink', function () {
-    function primaryKey(value) {}
     function sortBy(x, y) {}
     var downlink = test.client.downlink()
       .node(test.resolve('house/kitchen#light'))
       .lane('light/on')
-      .primaryKey(primaryKey)
       .sortBy(sortBy)
       .syncMap();
     assert.equal(downlink.constructor.name, 'MapDownlink');
-    assert.equal(downlink.primaryKey, primaryKey);
     assert.equal(downlink.sortBy, sortBy);
   });
 });
