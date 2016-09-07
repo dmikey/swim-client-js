@@ -18,7 +18,7 @@ assert.same = function (x, y) {
 };
 
 function TestFixture() {
-  this.hostUri = 'http://localhost:8009';
+  this.hostUri = 'ws://localhost:8009';
 }
 TestFixture.prototype.start = function (done) {
   var test = this;

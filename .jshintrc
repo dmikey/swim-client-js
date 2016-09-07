@@ -1,4 +1,5 @@
 {
+  "browser": true,
   "eqeqeq": true,
   "node": true,
   "proto": true,

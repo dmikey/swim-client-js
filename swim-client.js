@@ -86,7 +86,11 @@ Object.defineProperty(Client.prototype, 'callChannelWithLinkArgs', {
 Client.prototype.getOrCreateChannel = function (hostUri) {
   var channel = this.channels[hostUri];
   if (channel === undefined) {
-    channel = new Channel(this, hostUri, this.options);
+    if (this.options.noWebSocket || /^http/.test(hostUri)) {
+      channel = new HttpSocketChannel(this, hostUri, this.options);
+    } else {
+      channel = new WebSocketChannel(this, hostUri, this.options);
+    }
     this.channels[hostUri] = channel;
   }
   return channel;
@@ -430,12 +434,6 @@ Object.defineProperty(Channel.prototype, 'sendBufferSize', {
     return this.options.sendBufferSize || 1024;
   }
 });
-Object.defineProperty(Channel.prototype, 'isConnected', {
-  get: function () {
-    return this.socket && this.socket.readyState === this.socket.OPEN;
-  },
-  enumerable: true
-});
 Channel.prototype.resolve = function (unresolvedUri) {
   return this.uriCache.resolve(unresolvedUri);
 };
@@ -713,38 +711,6 @@ Channel.prototype.onError = function () {
     }
   }
 };
-Channel.prototype.open = function () {
-  this.clearReconnect();
-  if (!this.socket) {
-    this.socket = this.protocols ?
-      new WebSocket(this.hostUri, this.protocols) :
-      new WebSocket(this.hostUri);
-    this.socket.onopen = this.onWebSocketOpen.bind(this);
-    this.socket.onmessage = this.onWebSocketMessage.bind(this);
-    this.socket.onerror = this.onWebSocketError.bind(this);
-    this.socket.onclose = this.onWebSocketClose.bind(this);
-  }
-};
-Channel.prototype.close = function () {
-  this.clearReconnect();
-  this.clearIdle();
-  if (this.socket) {
-    this.socket.close();
-    this.socket = null;
-  }
-  var downlinks = this.downlinks;
-  Object.defineProperty(this, 'downlinks', {value: {}, configurable: true});
-  for (var nodeUri in downlinks) {
-    var nodeDownlinks = downlinks[nodeUri];
-    for (var laneUri in nodeDownlinks) {
-      var laneDownlinks = nodeDownlinks[laneUri];
-      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
-        var downlink = laneDownlinks[i];
-        downlink.onChannelClose();
-      }
-    }
-  }
-};
 Channel.prototype.reconnect = function () {
   if (this.reconnectTimer) return;
   if (!this.reconnectTimeout) {
@@ -779,7 +745,55 @@ Channel.prototype.checkIdle = function () {
     this.close();
   }
 };
-Channel.prototype.push = function (envelope) {
+Channel.prototype.close = function () {
+  var downlinks = this.downlinks;
+  Object.defineProperty(this, 'downlinks', {value: {}, configurable: true});
+  for (var nodeUri in downlinks) {
+    var nodeDownlinks = downlinks[nodeUri];
+    for (var laneUri in nodeDownlinks) {
+      var laneDownlinks = nodeDownlinks[laneUri];
+      for (var i = 0, n = laneDownlinks.length; i < n; i += 1) {
+        var downlink = laneDownlinks[i];
+        downlink.onChannelClose();
+      }
+    }
+  }
+};
+
+
+function WebSocketChannel(client, hostUri, options) {
+  Channel.call(this, client, hostUri, options);
+}
+WebSocketChannel.prototype = Object.create(Channel.prototype);
+WebSocketChannel.prototype.constructor = WebSocketChannel;
+Object.defineProperty(WebSocketChannel.prototype, 'isConnected', {
+  get: function () {
+    return this.socket && this.socket.readyState === this.socket.OPEN;
+  },
+  enumerable: true
+});
+WebSocketChannel.prototype.open = function () {
+  this.clearReconnect();
+  if (!this.socket) {
+    this.socket = this.protocols ?
+      new WebSocket(this.hostUri, this.protocols) :
+      new WebSocket(this.hostUri);
+    this.socket.onopen = this.onWebSocketOpen.bind(this);
+    this.socket.onmessage = this.onWebSocketMessage.bind(this);
+    this.socket.onerror = this.onWebSocketError.bind(this);
+    this.socket.onclose = this.onWebSocketClose.bind(this);
+  }
+};
+WebSocketChannel.prototype.close = function () {
+  this.clearReconnect();
+  this.clearIdle();
+  if (this.socket) {
+    this.socket.close();
+    this.socket = null;
+  }
+  Channel.prototype.close.call(this);
+};
+WebSocketChannel.prototype.push = function (envelope) {
   if (this.isConnected) {
     this.clearIdle();
     var text = proto.stringify(envelope);
@@ -794,7 +808,7 @@ Channel.prototype.push = function (envelope) {
     this.open();
   }
 };
-Channel.prototype.onWebSocketOpen = function () {
+WebSocketChannel.prototype.onWebSocketOpen = function () {
   if (this.credentials) {
     var request = new proto.AuthRequest(this.credentials);
     this.push(request);
@@ -806,7 +820,7 @@ Channel.prototype.onWebSocketOpen = function () {
   }
   this.watchIdle();
 };
-Channel.prototype.onWebSocketMessage = function (message) {
+WebSocketChannel.prototype.onWebSocketMessage = function (message) {
   var data = message.data;
   if (typeof data === 'string') {
     var envelope = proto.parse(data);
@@ -815,7 +829,7 @@ Channel.prototype.onWebSocketMessage = function (message) {
     }
   }
 };
-Channel.prototype.onWebSocketError = function () {
+WebSocketChannel.prototype.onWebSocketError = function () {
   this.onError();
   this.clearIdle();
   if (this.socket) {
@@ -827,7 +841,7 @@ Channel.prototype.onWebSocketError = function () {
     this.socket = null;
   }
 };
-Channel.prototype.onWebSocketClose = function () {
+WebSocketChannel.prototype.onWebSocketClose = function () {
   this.isAuthorized = false;
   this.session = null;
   this.socket = null;
@@ -836,6 +850,169 @@ Channel.prototype.onWebSocketClose = function () {
   if (this.sendBuffer.length > 0 || Object.keys(this.downlinks).length > 0) {
     this.reconnect();
   }
+};
+
+
+function HttpSocketChannel(client, hostUri, options) {
+  Channel.call(this, client, hostUri, options);
+  Object.defineProperty(this, 'channelId', {value: null, writable: true});
+  Object.defineProperty(this, 'parser', {value: null, writable: true});
+  Object.defineProperty(this, 'offset', {value: 0, writable: true});
+  Object.defineProperty(this, 'sendTimer', {value: null, writable: true});
+}
+HttpSocketChannel.prototype = Object.create(Channel.prototype);
+HttpSocketChannel.prototype.constructor = HttpSocketChannel;
+Object.defineProperty(HttpSocketChannel.prototype, 'sendDelay', {
+  get: function () {
+    return this.options.sendDelay || 100;
+  }
+});
+Object.defineProperty(HttpSocketChannel.prototype, 'isConnected', {
+  get: function () {
+    return this.socket && this.socket.readyState >= 1;
+  },
+  enumerable: true
+});
+HttpSocketChannel.prototype.throttleSend = function () {
+  if (!this.sendTimer) {
+    this.sendTimer = setTimeout(this.send.bind(this), this.sendDelay);
+  }
+};
+HttpSocketChannel.prototype.clearSend = function () {
+  if (this.sendTimer) {
+    clearTimeout(this.sendTimer);
+    this.sendTimer = null;
+  }
+};
+HttpSocketChannel.prototype.open = function () {
+  this.clearReconnect();
+  if (!this.socket) {
+    this.socket = new XMLHttpRequest();
+    this.socket.open('POST', this.hostUri);
+    this.socket.onreadystatechange = this.onHttpSocketChange.bind(this);
+    this.socket.onloadstart = this.onHttpSocketOpen.bind(this);
+    this.socket.onprogress = this.onHttpSocketData.bind(this);
+    this.socket.onload = this.onHttpSocketData.bind(this);
+    this.socket.onerror = this.onHttpSocketError.bind(this);
+    this.socket.onloadend = this.onHttpSocketClose.bind(this);
+    this.socket.setRequestHeader('X-Swim-Connection', 'Upgrade');
+    this.socket.send();
+  }
+};
+HttpSocketChannel.prototype.close = function () {
+  this.clearReconnect();
+  this.clearIdle();
+  this.clearSend();
+  if (this.socket) {
+    this.socket.abort();
+    this.socket = null;
+  }
+  Channel.prototype.close.call(this);
+};
+HttpSocketChannel.prototype.send = function () {
+  this.clearSend();
+  if (!this.channelId) {
+    this.throttleSend();
+    return;
+  }
+  var request = new XMLHttpRequest();
+  request.open('POST', this.hostUri);
+  request.setRequestHeader('X-Swim-Channel', this.channelId);
+  this.watchIdle();
+  var body = '';
+  var envelope;
+  while ((envelope = this.sendBuffer.shift())) {
+    body = body + proto.stringify(envelope) + '\n';
+  }
+  request.send(body);
+};
+HttpSocketChannel.prototype.push = function (envelope) {
+  if (this.isConnected) {
+    this.clearIdle();
+    this.sendBuffer.push(envelope);
+    this.throttleSend();
+  } else if (envelope.isCommandMessage) {
+    if (this.sendBuffer.length < this.sendBufferSize) {
+      this.sendBuffer.push(envelope);
+    } else {
+      // TODO
+    }
+    this.open();
+  }
+};
+HttpSocketChannel.prototype.onHttpSocketOpen = function () {
+  this.parser = new recon.BlockParser();
+  this.offset = 0;
+  this.onConnect();
+  this.watchIdle();
+};
+HttpSocketChannel.prototype.onHttpSocketChange = function () {
+  if (this.socket.readyState === 2) {
+    this.channelId = this.socket.getResponseHeader('X-Swim-Channel');
+    if (!this.channelId) {
+      this.socket.abort();
+    }
+  }
+}
+HttpSocketChannel.prototype.onHttpSocketData = function () {
+  var input = new LineIterator(this.socket.responseText, this.offset, true);
+  while ((!input.isInputEmpty() || input.isInputDone()) && this.parser.isCont()) {
+    var next = this.parser;
+    while ((!input.isEmpty() || input.isDone()) && next.isCont()) {
+      next = next.feed(input);
+    }
+    if (!input.isInputEmpty() && input.head() === 10/*'\n'*/) {
+      input.step();
+    }
+    this.offset = input.index;
+    if (next.isDone()) {
+      var envelope = proto.decode(next.state());
+      if (envelope) {
+        this.onEnvelope(envelope);
+      }
+      this.parser = new recon.BlockParser();
+    } else if (next.isError()) {
+      // TODO
+      this.parser = new recon.BlockParser();
+      break;
+    } else {
+      this.parser = next;
+    }
+  }
+};
+HttpSocketChannel.prototype.onHttpSocketError = function () {
+  this.onError();
+  this.clearIdle();
+};
+HttpSocketChannel.prototype.onHttpSocketClose = function () {
+  this.isAuthorized = false;
+  this.session = null;
+  this.socket = null;
+  this.onDisconnect();
+  this.clearIdle();
+  if (this.sendBuffer.length > 0 || Object.keys(this.downlinks).length > 0) {
+    this.reconnect();
+  }
+};
+
+
+function LineIterator(string, index, more) {
+  recon.StringIterator.call(this, string, index, more);
+}
+LineIterator.prototype = Object.create(recon.StringIterator.prototype);
+LineIterator.prototype.constructor = LineIterator;
+LineIterator.prototype.isDone = function () {
+  return this.index >= this.string.length && !this.more ||
+    this.index < this.string.length && this.head() === 10 /*'\n'*/;
+};
+LineIterator.prototype.isEmpty = function () {
+  return this.index >= this.string.length || this.head() === 10 /*'\n'*/;
+};
+LineIterator.prototype.isInputDone = function () {
+  return recon.StringIterator.prototype.isDone.call(this);
+};
+LineIterator.prototype.isInputEmpty = function () {
+  return recon.StringIterator.prototype.isEmpty.call(this);
 };
 
 
