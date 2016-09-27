@@ -65,6 +65,7 @@ function builtScripts() {
       debug: devel || !debug
     })
     .require(main, {expose: 'swim-client-js'})
+    .ignore('websocket')
     .bundle()
     .pipe(source('swim-client.min.js'))
     .pipe(buffer())
