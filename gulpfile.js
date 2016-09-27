@@ -32,7 +32,7 @@ var debug = args.debug || devel; // --devel implies --debug
 
 var configFile = './config.json';
 var main = './swim-client.js';
-var scripts = [main];
+var scripts = [main, './src/*.js'];
 var tests = ['./swim-client-test.js'];
 var sources = scripts.concat(tests);
 
@@ -65,8 +65,6 @@ function builtScripts() {
       debug: devel || !debug
     })
     .require(main, {expose: 'swim-client-js'})
-    .external('recon-js')
-    .ignore('websocket')
     .bundle()
     .pipe(source('swim-client.min.js'))
     .pipe(buffer())
