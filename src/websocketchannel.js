@@ -2,6 +2,7 @@
 
 var proto = require('swim-proto-js');
 var Channel = require('./channel');
+var WebSocket = require('./websocket');
 
 function WebSocketChannel(client, hostUri, options) {
     Channel.call(this, client, hostUri, options);
