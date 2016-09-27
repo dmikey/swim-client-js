@@ -2,9 +2,9 @@
 
 var Scope = require('./scope');
 var DownlinkBuilder = require('./downlinkbuilder');
-var Client = require('./client');
 var NodeScope = require('./nodescope');
 var LaneScope = require('./lanescope');
+var Utility = require('./utility');
 
 function HostScope(channel, hostUri) {
     Scope.call(this, channel);
@@ -31,39 +31,39 @@ HostScope.prototype.downlink = function () {
 };
 
 HostScope.prototype.link = function (nodeUri, laneUri, options) {
-    var downlink = this.channel.link(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+    var downlink = this.channel.link(Utility.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
     this.registerDownlink(downlink);
     return downlink;
 };
 
 HostScope.prototype.sync = function (nodeUri, laneUri, options) {
-    var downlink = this.channel.sync(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+    var downlink = this.channel.sync(Utility.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
     this.registerDownlink(downlink);
     return downlink;
 };
 
 HostScope.prototype.syncList = function (nodeUri, laneUri, options) {
-    var downlink = this.channel.syncList(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+    var downlink = this.channel.syncList(Utility.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
     this.registerDownlink(downlink);
     return downlink;
 };
 
 HostScope.prototype.syncMap = function (nodeUri, laneUri, options) {
-    var downlink = this.channel.syncMap(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
+    var downlink = this.channel.syncMap(Utility.resolveNodeUri(this.hostUri, nodeUri), laneUri, options);
     this.registerDownlink(downlink);
     return downlink;
 };
 
 HostScope.prototype.command = function (nodeUri, laneUri, body) {
-    this.channel.command(Client.resolveNodeUri(this.hostUri, nodeUri), laneUri, body);
+    this.channel.command(Utility.resolveNodeUri(this.hostUri, nodeUri), laneUri, body);
 };
 
 HostScope.prototype.node = function (nodeUri) {
-    return new NodeScope(this.channel, this.hostUri, Client.resolveNodeUri(this.hostUri, nodeUri));
+    return new NodeScope(this.channel, this.hostUri, Utility.resolveNodeUri(this.hostUri, nodeUri));
 };
 
 HostScope.prototype.lane = function (nodeUri, laneUri) {
-    return new LaneScope(this.channel, this.hostUri, Client.resolveNodeUri(this.hostUri, nodeUri), laneUri);
+    return new LaneScope(this.channel, this.hostUri, Utility.resolveNodeUri(this.hostUri, nodeUri), laneUri);
 };
 
 module.exports = HostScope;
