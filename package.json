@@ -3,7 +3,10 @@
   "version": "0.4.7",
   "description": "Swim Client JavaScript Implementation",
   "homepage": "https://github.com/swimit/swim-client-js",
-  "author": "Chris Sachs <chris@swim.it>",
+  "contributors": [
+    "Chris Sachs <chris@swim.it>",
+    "Derek Anderson <derek@swim.it>"
+  ],
   "license": "Apache-2.0",
   "keywords": [
     "actor",
